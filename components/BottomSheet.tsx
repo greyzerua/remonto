@@ -54,8 +54,21 @@ export default function BottomSheet({
   // Стани
   const [screenHeight, setScreenHeight] = useState(screenHeightValue);
   const [sheetHeight, setSheetHeight] = useState(0);
+  const [isAnimating, setIsAnimating] = useState(false);
+  const [shouldRender, setShouldRender] = useState(false);
   const panStartY = useRef(0);
   const currentTranslateY = useRef(screenHeightValue);
+  const isRenderedRef = useRef(false);
+  const prevVisibleRef = useRef(visible);
+  
+  // Ініціалізуємо shouldRender якщо visible вже true при монтуванні
+  useEffect(() => {
+    if (visible) {
+      setShouldRender(true);
+      isRenderedRef.current = true;
+      prevVisibleRef.current = true;
+    }
+  }, []);
 
   // Функція закриття
   const handleClose = useCallback(() => {
@@ -63,52 +76,73 @@ export default function BottomSheet({
     onClose();
   }, [onClose]);
 
-  // Анімація відкриття
+  // Анімація відкриття/закриття
   useEffect(() => {
-    if (visible) {
+    const wasVisible = prevVisibleRef.current;
+    prevVisibleRef.current = visible;
+
+    if (visible && !wasVisible) {
+      // Відкриття: показуємо компонент перед анімацією
+      setShouldRender(true);
+      setIsAnimating(true);
+      isRenderedRef.current = true;
+      
       const initialHeight = sheetHeight > 0 ? sheetHeight : screenHeight;
       translateY.setValue(initialHeight);
       backdropOpacityAnim.setValue(0);
       currentTranslateY.current = initialHeight;
 
-      Animated.parallel([
-        Animated.spring(translateY, {
-          toValue: 0,
-          useNativeDriver: true,
-          tension: 50,
-          friction: 7,
-        }),
-        Animated.timing(backdropOpacityAnim, {
-          toValue: backdropOpacity,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-      ]).start(() => {
-        currentTranslateY.current = 0;
+      // Невелика затримка для правильного рендерингу
+      requestAnimationFrame(() => {
+        Animated.parallel([
+          Animated.spring(translateY, {
+            toValue: 0,
+            useNativeDriver: true,
+            tension: 50,
+            friction: 7,
+          }),
+          Animated.timing(backdropOpacityAnim, {
+            toValue: backdropOpacity,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+        ]).start(() => {
+          currentTranslateY.current = 0;
+          setIsAnimating(false);
+        });
       });
-    } else {
-      const closeHeight = sheetHeight > 0 ? sheetHeight : screenHeight;
-      Animated.parallel([
-        Animated.spring(translateY, {
-          toValue: closeHeight,
-          useNativeDriver: true,
-          tension: 50,
-          friction: 7,
-        }),
-        Animated.timing(backdropOpacityAnim, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-      ]).start(() => {
-        currentTranslateY.current = closeHeight;
-      });
+    } else if (!visible && wasVisible) {
+      // Закриття: запускаємо анімацію тільки якщо компонент був відкритий
+      // Перевіряємо через ref, щоб отримати актуальне значення
+      if (isRenderedRef.current) {
+        setIsAnimating(true);
+        const closeHeight = sheetHeight > 0 ? sheetHeight : screenHeight;
+        
+        Animated.parallel([
+          Animated.spring(translateY, {
+            toValue: closeHeight,
+            useNativeDriver: true,
+            tension: 50,
+            friction: 7,
+          }),
+          Animated.timing(backdropOpacityAnim, {
+            toValue: 0,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+        ]).start(() => {
+          currentTranslateY.current = closeHeight;
+          setIsAnimating(false);
+          setShouldRender(false);
+          isRenderedRef.current = false;
+        });
+      }
     }
   }, [visible, backdropOpacity, screenHeight, sheetHeight]);
 
   // Обробка клавіатури
   useEffect(() => {
-    if (!visible) return;
+    if (!visible || !shouldRender) return;
 
     const showSubscription = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
@@ -140,7 +174,7 @@ export default function BottomSheet({
       showSubscription.remove();
       hideSubscription.remove();
     };
-  }, [visible]);
+  }, [visible, shouldRender]);
 
   // PanResponder для свайпу вниз
   const panResponder = useRef(
@@ -172,6 +206,7 @@ export default function BottomSheet({
         
         if (gestureState.dy > threshold && enablePanDownToClose) {
           // Закриваємо, якщо свайпнули достатньо вниз
+          setIsAnimating(true);
           const closeHeight = sheetHeight > 0 ? sheetHeight : screenHeight;
           Animated.parallel([
             Animated.spring(translateY, {
@@ -187,6 +222,9 @@ export default function BottomSheet({
             }),
           ]).start(() => {
             currentTranslateY.current = closeHeight;
+            setIsAnimating(false);
+            setShouldRender(false);
+            isRenderedRef.current = false;
             handleClose();
           });
         } else {
@@ -230,13 +268,13 @@ export default function BottomSheet({
     setScreenHeight(event.nativeEvent.layout.height);
   };
 
-  if (!visible) {
+  if (!shouldRender) {
     return null;
   }
 
   return (
     <Modal
-      visible={visible}
+      visible={shouldRender}
       transparent
       animationType="none"
       statusBarTranslucent
