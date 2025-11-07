@@ -99,13 +99,13 @@ export async function updateProject(projectId: string, formData: ProjectFormData
 /**
  * Видалити проект
  */
-export async function deleteProject(projectId: string): Promise<void> {
+export async function deleteProject(projectId: string, userId: string): Promise<void> {
   try {
     // Видаляємо проект
     await deleteDoc(doc(db, 'projects', projectId));
 
     // Видаляємо всі витрати проекту
-    const expenses = await getExpensesByProject(projectId);
+    const expenses = await getExpensesByProject(projectId, userId);
     const deletePromises = expenses.map((expense) => deleteExpense(expense.id));
     await Promise.all(deletePromises);
   } catch (error) {
@@ -277,12 +277,13 @@ export async function getExpense(expenseId: string): Promise<Expense | null> {
 /**
  * Отримати витрати по проекту
  */
-export async function getExpensesByProject(projectId: string): Promise<Expense[]> {
+export async function getExpensesByProject(projectId: string, userId: string): Promise<Expense[]> {
   try {
-    // Використовуємо тільки where, сортування на клієнті
+    // Додаємо фільтр createdBy для відповідності правилам безпеки Firestore
     const q = query(
       collection(db, 'expenses'),
-      where('projectId', '==', projectId)
+      where('projectId', '==', projectId),
+      where('createdBy', '==', userId)
     );
     const querySnapshot = await getDocs(q);
     const expenses = querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Expense));
@@ -305,12 +306,14 @@ export async function getExpensesByProject(projectId: string): Promise<Expense[]
  */
 export function subscribeToExpenses(
   projectId: string,
+  userId: string,
   callback: (expenses: Expense[]) => void
 ): () => void {
-  // Використовуємо тільки where, сортування на клієнті
+  // Додаємо фільтр createdBy для відповідності правилам безпеки Firestore
   const q = query(
     collection(db, 'expenses'),
-    where('projectId', '==', projectId)
+    where('projectId', '==', projectId),
+    where('createdBy', '==', userId)
   );
 
   return onSnapshot(q, (querySnapshot) => {

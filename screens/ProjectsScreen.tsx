@@ -10,7 +10,7 @@ import {
   TextInput,
   ScrollView,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import {
   subscribeToProjects,
@@ -21,10 +21,11 @@ import {
 } from '../services/firestore';
 import { Project, ProjectFormData, ProjectStatus } from '../types';
 import { formatDateShort, formatCurrency, getStatusName } from '../utils/helpers';
-import BottomSheet from '../components/BottomSheet';
+import BottomSheet, { BottomSheetScrollView, BottomSheetTextInput } from '../components/BottomSheet';
 
 export default function ProjectsScreen() {
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
@@ -87,7 +88,7 @@ export default function ProjectsScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await deleteProject(project.id);
+              await deleteProject(project.id, user.uid);
             } catch (error) {
               Alert.alert('Помилка', 'Не вдалося видалити проект');
             }
@@ -247,14 +248,23 @@ export default function ProjectsScreen() {
           enableBackdrop={true}
           backdropOpacity={0.5}
         >
-          <ScrollView style={styles.bottomSheetContent} keyboardShouldPersistTaps="handled">
+          <BottomSheetScrollView 
+            style={styles.bottomSheetContent} 
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={[
+              styles.bottomSheetScrollContent,
+              { paddingBottom: 200 + insets.bottom }
+            ]}
+            showsVerticalScrollIndicator={true}
+            bounces={false}
+          >
             <Text style={styles.modalTitle}>
               {editingProject ? 'Редагувати проект' : 'Новий проект'}
             </Text>
 
                 <View style={styles.inputContainer}>
                   <Text style={styles.label}>Назва проекту *</Text>
-                  <TextInput
+                  <BottomSheetTextInput
                     style={styles.input}
                     placeholder="Наприклад: Ремонт кухні"
                     value={formData.name}
@@ -266,7 +276,7 @@ export default function ProjectsScreen() {
 
                 <View style={styles.inputContainer}>
                   <Text style={styles.label}>Опис</Text>
-                  <TextInput
+                  <BottomSheetTextInput
                     style={[styles.input, styles.textArea]}
                     placeholder="Опис проекту (опціонально)"
                     value={formData.description}
@@ -308,7 +318,7 @@ export default function ProjectsScreen() {
 
                 <View style={styles.inputContainer}>
                   <Text style={styles.label}>Бюджет (₴)</Text>
-                  <TextInput
+                  <BottomSheetTextInput
                     style={styles.input}
                     placeholder="0"
                     value={formData.budget?.toString() || ''}
@@ -345,7 +355,8 @@ export default function ProjectsScreen() {
                 )}
               </TouchableOpacity>
             </View>
-          </ScrollView>
+            <View style={{ height: 100 }} />
+          </BottomSheetScrollView>
         </BottomSheet>
       </View>
     </SafeAreaView>
@@ -490,7 +501,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   bottomSheetContent: {
+    flex: 1,
+  },
+  bottomSheetScrollContent: {
     padding: 20,
+    paddingBottom: 120,
   },
   modalTitle: {
     fontSize: 20,
@@ -548,6 +563,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginTop: 20,
+    marginBottom: 20,
   },
   modalButton: {
     flex: 1,

@@ -10,7 +10,7 @@ import {
   TextInput,
   ScrollView,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import {
   subscribeToProjects,
@@ -21,10 +21,11 @@ import {
 } from '../services/firestore';
 import { Project, Expense, ExpenseFormData } from '../types';
 import { formatCurrency } from '../utils/helpers';
-import BottomSheet from '../components/BottomSheet';
+import BottomSheet, { BottomSheetScrollView, BottomSheetTextInput } from '../components/BottomSheet';
 
 export default function ExpensesScreen() {
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -62,14 +63,14 @@ export default function ExpensesScreen() {
   }, [user]);
 
   useEffect(() => {
-    if (!selectedProject) return;
+    if (!selectedProject || !user) return;
 
-    const unsubscribe = subscribeToExpenses(selectedProject.id, (updatedExpenses) => {
+    const unsubscribe = subscribeToExpenses(selectedProject.id, user.uid, (updatedExpenses) => {
       setExpenses(updatedExpenses);
     });
 
     return () => unsubscribe();
-  }, [selectedProject]);
+  }, [selectedProject, user]);
 
   const handleCreateExpense = () => {
     if (!selectedProject) {
@@ -402,14 +403,23 @@ export default function ExpensesScreen() {
           enableBackdrop={true}
           backdropOpacity={0.5}
         >
-          <ScrollView style={styles.bottomSheetContent} keyboardShouldPersistTaps="handled">
+          <BottomSheetScrollView 
+            style={styles.bottomSheetContent} 
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={[
+              styles.bottomSheetScrollContent,
+              { paddingBottom: 200 + insets.bottom }
+            ]}
+            showsVerticalScrollIndicator={true}
+            bounces={false}
+          >
             <Text style={styles.modalTitle}>
               {editingExpense ? 'Редагувати категорію' : 'Нова категорія'}
             </Text>
 
                 <View style={styles.inputContainer}>
                   <Text style={styles.label}>Назва категорії *</Text>
-                  <TextInput
+                  <BottomSheetTextInput
                     style={styles.input}
                     placeholder="Наприклад: Монтаж"
                     value={formData.categoryName}
@@ -421,7 +431,7 @@ export default function ExpensesScreen() {
 
                 <View style={styles.inputContainer}>
                   <Text style={styles.label}>🔹 Робота (₴)</Text>
-                  <TextInput
+                  <BottomSheetTextInput
                     style={styles.input}
                     placeholder="0"
                     value={formData.labor > 0 ? formData.labor.toString() : ''}
@@ -438,7 +448,7 @@ export default function ExpensesScreen() {
 
                 <View style={styles.inputContainer}>
                   <Text style={styles.label}>🔹 Матеріали (₴)</Text>
-                  <TextInput
+                  <BottomSheetTextInput
                     style={styles.input}
                     placeholder="0"
                     value={formData.materials > 0 ? formData.materials.toString() : ''}
@@ -462,7 +472,7 @@ export default function ExpensesScreen() {
 
                 <View style={styles.inputContainer}>
                   <Text style={styles.label}>Опис (опціонально)</Text>
-                  <TextInput
+                  <BottomSheetTextInput
                     style={[styles.input, styles.textArea]}
                     placeholder="Додатковий опис категорії"
                     value={formData.description}
@@ -496,7 +506,8 @@ export default function ExpensesScreen() {
                 )}
               </TouchableOpacity>
             </View>
-          </ScrollView>
+            <View style={{ height: 100 }} />
+          </BottomSheetScrollView>
         </BottomSheet>
       </View>
     </SafeAreaView>
@@ -753,7 +764,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   bottomSheetContent: {
+    flex: 1,
+  },
+  bottomSheetScrollContent: {
     padding: 20,
+    paddingBottom: 120,
   },
   modalTitle: {
     fontSize: 20,
@@ -805,6 +820,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginTop: 20,
+    marginBottom: 20,
   },
   modalButton: {
     flex: 1,
