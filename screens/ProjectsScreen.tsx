@@ -7,12 +7,10 @@ import {
   FlatList,
   Alert,
   ActivityIndicator,
-  Modal,
   TextInput,
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFamilyGroup } from '../contexts/FamilyGroupContext';
 import { useAuth } from '../contexts/AuthContext';
 import {
   subscribeToProjects,
@@ -23,9 +21,9 @@ import {
 } from '../services/firestore';
 import { Project, ProjectFormData, ProjectStatus } from '../types';
 import { formatDateShort, formatCurrency, getStatusName } from '../utils/helpers';
+import BottomSheet from '../components/BottomSheet';
 
 export default function ProjectsScreen() {
-  const { currentGroup } = useFamilyGroup();
   const { user } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,15 +40,15 @@ export default function ProjectsScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!currentGroup) return;
+    if (!user) return;
 
-    const unsubscribe = subscribeToProjects(currentGroup.id, (updatedProjects) => {
+    const unsubscribe = subscribeToProjects(user.uid, (updatedProjects) => {
       setProjects(updatedProjects);
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, [currentGroup]);
+  }, [user]);
 
   const handleCreateProject = () => {
     setEditingProject(null);
@@ -105,7 +103,7 @@ export default function ProjectsScreen() {
       return;
     }
 
-    if (!currentGroup || !user) {
+    if (!user) {
       Alert.alert('Помилка', 'Помилка авторизації');
       return;
     }
@@ -115,7 +113,7 @@ export default function ProjectsScreen() {
       if (editingProject) {
         await updateProject(editingProject.id, formData);
       } else {
-        await createProject(formData, currentGroup.id, user.uid);
+        await createProject(formData, user.uid);
       }
       setModalVisible(false);
       setEditingProject(null);
@@ -238,19 +236,21 @@ export default function ProjectsScreen() {
           </>
         )}
 
-        {/* Модальне вікно для створення/редагування */}
-        <Modal
+        {/* BottomSheet для створення/редагування */}
+        <BottomSheet
           visible={modalVisible}
-          animationType="slide"
-          transparent={true}
-          onRequestClose={() => setModalVisible(false)}
+          onClose={() => {
+            setModalVisible(false);
+            setEditingProject(null);
+          }}
+          enablePanDownToClose={true}
+          enableBackdrop={true}
+          backdropOpacity={0.5}
         >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <ScrollView>
-                <Text style={styles.modalTitle}>
-                  {editingProject ? 'Редагувати проект' : 'Новий проект'}
-                </Text>
+          <ScrollView style={styles.bottomSheetContent} keyboardShouldPersistTaps="handled">
+            <Text style={styles.modalTitle}>
+              {editingProject ? 'Редагувати проект' : 'Новий проект'}
+            </Text>
 
                 <View style={styles.inputContainer}>
                   <Text style={styles.label}>Назва проекту *</Text>
@@ -323,32 +323,30 @@ export default function ProjectsScreen() {
                   />
                 </View>
 
-                <View style={styles.modalActions}>
-                  <TouchableOpacity
-                    style={[styles.modalButton, styles.cancelButton]}
-                    onPress={() => {
-                      setModalVisible(false);
-                      setEditingProject(null);
-                    }}
-                  >
-                    <Text style={styles.cancelButtonText}>Скасувати</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.modalButton, styles.saveButton]}
-                    onPress={handleSubmit}
-                    disabled={submitting}
-                  >
-                    {submitting ? (
-                      <ActivityIndicator color="#fff" />
-                    ) : (
-                      <Text style={styles.saveButtonText}>Зберегти</Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              </ScrollView>
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={() => {
+                  setModalVisible(false);
+                  setEditingProject(null);
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Скасувати</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.saveButton]}
+                onPress={handleSubmit}
+                disabled={submitting}
+              >
+                {submitting ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.saveButtonText}>Зберегти</Text>
+                )}
+              </TouchableOpacity>
             </View>
-          </View>
-        </Modal>
+          </ScrollView>
+        </BottomSheet>
       </View>
     </SafeAreaView>
   );
@@ -491,17 +489,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+  bottomSheetContent: {
     padding: 20,
-    maxHeight: '90%',
   },
   modalTitle: {
     fontSize: 20,

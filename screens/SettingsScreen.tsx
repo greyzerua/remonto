@@ -10,14 +10,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../contexts/AuthContext';
-import { useFamilyGroup } from '../contexts/FamilyGroupContext';
 import { logoutUser } from '../services/auth';
 import { formatDateShort } from '../utils/helpers';
 import { removeEmail } from '../utils/secureStorage';
 
 export default function SettingsScreen() {
   const { user, authUser, userData } = useAuth();
-  const { currentGroup, setCurrentGroup } = useFamilyGroup();
 
   const handleLogout = () => {
     Alert.alert('Вихід', 'Ви впевнені, що хочете вийти?', [
@@ -27,25 +25,12 @@ export default function SettingsScreen() {
         style: 'destructive',
         onPress: async () => {
           await logoutUser();
-          setCurrentGroup(null);
           // Очищаємо збережений email (паролів не зберігаємо!)
           try {
             await removeEmail();
           } catch (error) {
             console.error('Помилка очищення даних входу:', error);
           }
-        },
-      },
-    ]);
-  };
-
-  const handleChangeGroup = () => {
-    Alert.alert('Зміна групи', 'Ви впевнені, що хочете змінити групу?', [
-      { text: 'Скасувати', style: 'cancel' },
-      {
-        text: 'Змінити',
-        onPress: () => {
-          setCurrentGroup(null);
         },
       },
     ]);
@@ -73,32 +58,6 @@ export default function SettingsScreen() {
               {formatDateShort(userData.createdAt)}
             </Text>
           </View>
-        )}
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Родинна група</Text>
-        {currentGroup ? (
-          <>
-            <View style={styles.infoCard}>
-              <Text style={styles.infoLabel}>Назва групи</Text>
-              <Text style={styles.infoValue}>{currentGroup.name}</Text>
-            </View>
-            <View style={styles.infoCard}>
-              <Text style={styles.infoLabel}>Учасників</Text>
-              <Text style={styles.infoValue}>
-                {currentGroup.members.length}
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={[styles.button, styles.buttonSecondary]}
-              onPress={handleChangeGroup}
-            >
-              <Text style={styles.buttonSecondaryText}>Змінити групу</Text>
-            </TouchableOpacity>
-          </>
-        ) : (
-          <Text style={styles.noGroupText}>Група не вибрана</Text>
         )}
       </View>
 

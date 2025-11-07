@@ -15,110 +15,8 @@ import {
   DocumentData,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import { Project, Expense, FamilyGroup, ProjectFormData, ExpenseFormData, FamilyGroupFormData } from '../types';
+import { Project, Expense, ProjectFormData, ExpenseFormData } from '../types';
 import { generateId, getCurrentDate } from '../utils/helpers';
-
-// ==================== FAMILY GROUPS ====================
-
-/**
- * Створити родинну групу
- */
-export async function createFamilyGroup(
-  formData: FamilyGroupFormData,
-  ownerId: string
-): Promise<FamilyGroup> {
-  try {
-    const groupId = generateId();
-    const now = getCurrentDate();
-
-    const group: FamilyGroup = {
-      id: groupId,
-      name: formData.name,
-      ownerId,
-      members: [
-        {
-          userId: ownerId,
-          role: 'owner',
-          joinedAt: now,
-        },
-      ],
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    await setDoc(doc(db, 'familyGroups', groupId), group);
-    return group;
-  } catch (error) {
-    console.error('Помилка створення групи:', error);
-    throw error;
-  }
-}
-
-/**
- * Отримати групу за ID
- */
-export async function getFamilyGroup(groupId: string): Promise<FamilyGroup | null> {
-  try {
-    const groupDoc = await getDoc(doc(db, 'familyGroups', groupId));
-    if (groupDoc.exists()) {
-      return { id: groupDoc.id, ...groupDoc.data() } as FamilyGroup;
-    }
-    return null;
-  } catch (error) {
-    console.error('Помилка отримання групи:', error);
-    return null;
-  }
-}
-
-/**
- * Отримати групи користувача
- */
-export async function getUserFamilyGroups(userId: string): Promise<FamilyGroup[]> {
-  try {
-    // Отримуємо всі групи та фільтруємо на клієнті
-    // (Firestore не підтримує запити по вкладених масивах об'єктів)
-    const querySnapshot = await getDocs(collection(db, 'familyGroups'));
-    const groups = querySnapshot.docs
-      .map((doc) => ({ id: doc.id, ...doc.data() } as FamilyGroup))
-      .filter((group) => group.members.some((member) => member.userId === userId));
-    return groups;
-  } catch (error) {
-    console.error('Помилка отримання груп:', error);
-    return [];
-  }
-}
-
-/**
- * Додати користувача до групи
- */
-export async function addMemberToGroup(
-  groupId: string,
-  userId: string,
-  role: 'admin' | 'member' = 'member'
-): Promise<void> {
-  try {
-    const group = await getFamilyGroup(groupId);
-    if (!group) throw new Error('Група не знайдена');
-
-    const memberExists = group.members.some((m) => m.userId === userId);
-    if (memberExists) throw new Error('Користувач вже в групі');
-
-    group.members.push({
-      userId,
-      role,
-      joinedAt: getCurrentDate(),
-    });
-    group.updatedAt = getCurrentDate();
-
-    await updateDoc(doc(db, 'familyGroups', groupId), {
-      members: group.members,
-      updatedAt: group.updatedAt,
-    });
-  } catch (error) {
-    console.error('Помилка додавання користувача:', error);
-    throw error;
-  }
-}
 
 // ==================== PROJECTS ====================
 
@@ -127,7 +25,6 @@ export async function addMemberToGroup(
  */
 export async function createProject(
   formData: ProjectFormData,
-  familyGroupId: string,
   createdBy: string
 ): Promise<Project> {
   try {
@@ -137,7 +34,6 @@ export async function createProject(
     // Створюємо проект, виключаючи undefined значення
     const project: Partial<Project> = {
       id: projectId,
-      familyGroupId,
       name: formData.name,
       status: formData.status,
       createdBy,
@@ -235,14 +131,13 @@ export async function getProject(projectId: string): Promise<Project | null> {
 }
 
 /**
- * Отримати проекти групи
+ * Отримати проекти користувача
  */
-export async function getProjectsByGroup(familyGroupId: string): Promise<Project[]> {
+export async function getUserProjects(userId: string): Promise<Project[]> {
   try {
-    // Використовуємо тільки where, сортування на клієнті (щоб не потрібен був індекс)
     const q = query(
       collection(db, 'projects'),
-      where('familyGroupId', '==', familyGroupId)
+      where('createdBy', '==', userId)
     );
     const querySnapshot = await getDocs(q);
     const projects = querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Project));
@@ -260,16 +155,15 @@ export async function getProjectsByGroup(familyGroupId: string): Promise<Project
 }
 
 /**
- * Realtime підписка на проекти групи
+ * Realtime підписка на проекти користувача
  */
 export function subscribeToProjects(
-  familyGroupId: string,
+  userId: string,
   callback: (projects: Project[]) => void
 ): () => void {
-  // Використовуємо тільки where, сортування на клієнті (щоб не потрібен був індекс)
   const q = query(
     collection(db, 'projects'),
-    where('familyGroupId', '==', familyGroupId)
+    where('createdBy', '==', userId)
   );
 
   return onSnapshot(q, (querySnapshot) => {
@@ -295,7 +189,6 @@ export function subscribeToProjects(
  */
 export async function createExpense(
   formData: ExpenseFormData,
-  familyGroupId: string,
   createdBy: string
 ): Promise<Expense> {
   try {
@@ -306,11 +199,9 @@ export async function createExpense(
     const expense: Partial<Expense> = {
       id: expenseId,
       projectId: formData.projectId,
-      familyGroupId,
-      name: formData.name,
-      amount: formData.amount,
-      category: formData.category,
-      date: formData.date,
+      categoryName: formData.categoryName,
+      labor: formData.labor,
+      materials: formData.materials,
       createdBy,
       createdAt: now,
       updatedAt: now,
@@ -337,10 +228,9 @@ export async function updateExpense(expenseId: string, formData: ExpenseFormData
     // Створюємо об'єкт оновлення без undefined значень
     const updateData: any = {
       projectId: formData.projectId,
-      name: formData.name,
-      amount: formData.amount,
-      category: formData.category,
-      date: formData.date,
+      categoryName: formData.categoryName,
+      labor: formData.labor,
+      materials: formData.materials,
       updatedAt: getCurrentDate(),
     };
 
@@ -396,10 +286,10 @@ export async function getExpensesByProject(projectId: string): Promise<Expense[]
     );
     const querySnapshot = await getDocs(q);
     const expenses = querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Expense));
-    // Сортуємо на клієнті за датою (нові спочатку)
+    // Сортуємо на клієнті за датою створення (нові спочатку)
     expenses.sort((a, b) => {
-      const dateA = new Date(a.date).getTime();
-      const dateB = new Date(b.date).getTime();
+      const dateA = new Date(a.createdAt).getTime();
+      const dateB = new Date(b.createdAt).getTime();
       return dateB - dateA;
     });
     return expenses;
@@ -409,30 +299,6 @@ export async function getExpensesByProject(projectId: string): Promise<Expense[]
   }
 }
 
-/**
- * Отримати витрати групи
- */
-export async function getExpensesByGroup(familyGroupId: string): Promise<Expense[]> {
-  try {
-    // Використовуємо тільки where, сортування на клієнті
-    const q = query(
-      collection(db, 'expenses'),
-      where('familyGroupId', '==', familyGroupId)
-    );
-    const querySnapshot = await getDocs(q);
-    const expenses = querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Expense));
-    // Сортуємо на клієнті за датою (нові спочатку)
-    expenses.sort((a, b) => {
-      const dateA = new Date(a.date).getTime();
-      const dateB = new Date(b.date).getTime();
-      return dateB - dateA;
-    });
-    return expenses;
-  } catch (error) {
-    console.error('Помилка отримання витрат:', error);
-    return [];
-  }
-}
 
 /**
  * Realtime підписка на витрати проекту
@@ -452,38 +318,10 @@ export function subscribeToExpenses(
       id: doc.id,
       ...doc.data(),
     })) as Expense[];
-    // Сортуємо на клієнті за датою (нові спочатку)
+    // Сортуємо на клієнті за датою створення (нові спочатку)
     expenses.sort((a, b) => {
-      const dateA = new Date(a.date).getTime();
-      const dateB = new Date(b.date).getTime();
-      return dateB - dateA;
-    });
-    callback(expenses);
-  });
-}
-
-/**
- * Realtime підписка на витрати групи
- */
-export function subscribeToGroupExpenses(
-  familyGroupId: string,
-  callback: (expenses: Expense[]) => void
-): () => void {
-  // Використовуємо тільки where, сортування на клієнті
-  const q = query(
-    collection(db, 'expenses'),
-    where('familyGroupId', '==', familyGroupId)
-  );
-
-  return onSnapshot(q, (querySnapshot) => {
-    const expenses = querySnapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as Expense[];
-    // Сортуємо на клієнті за датою (нові спочатку)
-    expenses.sort((a, b) => {
-      const dateA = new Date(a.date).getTime();
-      const dateB = new Date(b.date).getTime();
+      const dateA = new Date(a.createdAt).getTime();
+      const dateB = new Date(b.createdAt).getTime();
       return dateB - dateA;
     });
     callback(expenses);
