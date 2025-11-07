@@ -5,9 +5,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { FamilyGroupProvider, useFamilyGroup } from './contexts/FamilyGroupContext';
 import AuthScreen from './screens/AuthScreen';
-import FamilyGroupScreen from './screens/FamilyGroupScreen';
 import ProjectsScreen from './screens/ProjectsScreen';
 import ExpensesScreen from './screens/ExpensesScreen';
 import SettingsScreen from './screens/SettingsScreen';
@@ -16,9 +14,8 @@ const Tab = createBottomTabNavigator();
 
 function MainNavigator() {
   const { user, loading: authLoading } = useAuth();
-  const { currentGroup, loading: groupLoading } = useFamilyGroup();
 
-  if (authLoading || groupLoading) {
+  if (authLoading) {
     return (
       <SafeAreaView style={styles.loadingContainer} edges={['top', 'bottom']}>
         <ActivityIndicator size="large" color="#007AFF" />
@@ -28,10 +25,6 @@ function MainNavigator() {
 
   if (!user) {
     return <AuthScreen />;
-  }
-
-  if (!currentGroup) {
-    return <FamilyGroupScreen />;
   }
 
   return (
@@ -79,12 +72,10 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <AuthProvider>
-        <FamilyGroupProvider>
-          <NavigationContainer>
-            <StatusBar style="auto" />
-            <MainNavigator />
-          </NavigationContainer>
-        </FamilyGroupProvider>
+        <NavigationContainer>
+          <StatusBar style="auto" />
+          <MainNavigator />
+        </NavigationContainer>
       </AuthProvider>
     </SafeAreaProvider>
   );
