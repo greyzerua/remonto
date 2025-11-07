@@ -1,16 +1,16 @@
-import React, { useEffect, useCallback, useState, useRef } from 'react';
-import {
-  View,
-  StyleSheet,
-  Modal,
-  TouchableWithoutFeedback,
-  Keyboard,
-  Platform,
-  Dimensions,
-  Animated,
-  PanResponder,
-} from 'react-native';
+import React, { useEffect, useCallback, useMemo, useRef } from 'react';
+import { View, StyleSheet, Dimensions, Keyboard, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  BottomSheetModal,
+  BottomSheetView,
+  BottomSheetBackdrop,
+  BottomSheetScrollView,
+  BottomSheetTextInput,
+} from '@gorhom/bottom-sheet';
+
+// Експортуємо BottomSheetScrollView та BottomSheetTextInput для використання в екранах
+export { BottomSheetScrollView, BottomSheetTextInput };
 
 export interface BottomSheetProps {
   visible: boolean;
@@ -30,7 +30,7 @@ export interface BottomSheetProps {
 }
 
 const DEFAULT_BACKDROP_OPACITY = 0.5;
-const DEFAULT_MAX_HEIGHT = 0.9; // 90% від висоти екрану
+const DEFAULT_MAX_HEIGHT = 0.8;
 
 export default function BottomSheet({
   visible,
@@ -44,322 +44,122 @@ export default function BottomSheet({
   maxHeight = DEFAULT_MAX_HEIGHT,
   minHeight = 0,
 }: BottomSheetProps) {
+  const bottomSheetModalRef = useRef<BottomSheetModal>(null);
+  const { height: screenHeight } = Dimensions.get('window');
   const insets = useSafeAreaInsets();
-  const { height: screenHeightValue } = Dimensions.get('window');
-  
-  // Анімовані значення
-  const translateY = useRef(new Animated.Value(screenHeightValue)).current;
-  const backdropOpacityAnim = useRef(new Animated.Value(0)).current;
-  
-  // Стани
-  const [screenHeight, setScreenHeight] = useState(screenHeightValue);
-  const [sheetHeight, setSheetHeight] = useState(0);
-  const [isAnimating, setIsAnimating] = useState(false);
-  const [shouldRender, setShouldRender] = useState(false);
-  const panStartY = useRef(0);
-  const currentTranslateY = useRef(screenHeightValue);
-  const isRenderedRef = useRef(false);
-  const prevVisibleRef = useRef(visible);
-  
-  // Ініціалізуємо shouldRender якщо visible вже true при монтуванні
+
+  // Обчислюємо snapPoints
+  const defaultSnapPoints = useMemo(() => {
+    if (snapPoints && snapPoints.length > 0) {
+      // Якщо snapPoints вказані як числа, конвертуємо їх у відсотки
+      return snapPoints.map((point) => {
+        if (point > 1) {
+          // Якщо це пікселі, конвертуємо у відсотки
+          return `${Math.round((point / screenHeight) * 100)}%`;
+        }
+        // Якщо це вже відсоток (0-1), конвертуємо у рядок
+        return `${Math.round(point * 100)}%`;
+      });
+    }
+    // Якщо snapPoints не вказані, використовуємо maxHeight у відсотках
+    // Використовуємо один snapPoint для стабільності
+    const maxHeightPercent = Math.round(maxHeight * 100);
+    return [`${maxHeightPercent}%`];
+  }, [snapPoints, screenHeight, maxHeight]);
+
+  // Мемоізуємо максимальний розмір контенту
+  const maxDynamicContentSize = useMemo(() => {
+    return screenHeight - insets.top - 60;
+  }, [screenHeight, insets.top]);
+
+  // Синхронізуємо visible з present/dismiss
   useEffect(() => {
     if (visible) {
-      setShouldRender(true);
-      isRenderedRef.current = true;
-      prevVisibleRef.current = true;
+      bottomSheetModalRef.current?.present();
+    } else {
+      bottomSheetModalRef.current?.dismiss();
     }
+  }, [visible]);
+
+  // Обробка подій клавіатури для коректного опускання BottomSheet
+  const handleKeyboardHide = useCallback(() => {
+    // Повертаємо BottomSheet до початкового snapPoint після закриття клавіатури
+    setTimeout(() => {
+      bottomSheetModalRef.current?.snapToIndex(0);
+    }, 100);
   }, []);
 
-  // Функція закриття
-  const handleClose = useCallback(() => {
-    Keyboard.dismiss();
-    onClose();
-  }, [onClose]);
-
-  // Анімація відкриття/закриття
   useEffect(() => {
-    const wasVisible = prevVisibleRef.current;
-    prevVisibleRef.current = visible;
+    if (!visible) return;
 
-    if (visible && !wasVisible) {
-      // Відкриття: показуємо компонент перед анімацією
-      setShouldRender(true);
-      setIsAnimating(true);
-      isRenderedRef.current = true;
-      
-      const initialHeight = sheetHeight > 0 ? sheetHeight : screenHeight;
-      translateY.setValue(initialHeight);
-      backdropOpacityAnim.setValue(0);
-      currentTranslateY.current = initialHeight;
-
-      // Невелика затримка для правильного рендерингу
-      requestAnimationFrame(() => {
-        Animated.parallel([
-          Animated.spring(translateY, {
-            toValue: 0,
-            useNativeDriver: true,
-            tension: 50,
-            friction: 7,
-          }),
-          Animated.timing(backdropOpacityAnim, {
-            toValue: backdropOpacity,
-            duration: 300,
-            useNativeDriver: true,
-          }),
-        ]).start(() => {
-          currentTranslateY.current = 0;
-          setIsAnimating(false);
-        });
-      });
-    } else if (!visible && wasVisible) {
-      // Закриття: запускаємо анімацію тільки якщо компонент був відкритий
-      // Перевіряємо через ref, щоб отримати актуальне значення
-      if (isRenderedRef.current) {
-        setIsAnimating(true);
-        const closeHeight = sheetHeight > 0 ? sheetHeight : screenHeight;
-        
-        Animated.parallel([
-          Animated.spring(translateY, {
-            toValue: closeHeight,
-            useNativeDriver: true,
-            tension: 50,
-            friction: 7,
-          }),
-          Animated.timing(backdropOpacityAnim, {
-            toValue: 0,
-            duration: 300,
-            useNativeDriver: true,
-          }),
-        ]).start(() => {
-          currentTranslateY.current = closeHeight;
-          setIsAnimating(false);
-          setShouldRender(false);
-          isRenderedRef.current = false;
-        });
-      }
-    }
-  }, [visible, backdropOpacity, screenHeight, sheetHeight]);
-
-  // Обробка клавіатури
-  useEffect(() => {
-    if (!visible || !shouldRender) return;
-
-    const showSubscription = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-      (e) => {
-        Animated.timing(translateY, {
-          toValue: -e.endCoordinates.height / 2,
-          duration: 250,
-          useNativeDriver: true,
-        }).start(() => {
-          currentTranslateY.current = -e.endCoordinates.height / 2;
-        });
-      }
-    );
-
-    const hideSubscription = Keyboard.addListener(
+    const keyboardWillHide = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-      () => {
-        Animated.timing(translateY, {
-          toValue: 0,
-          duration: 250,
-          useNativeDriver: true,
-        }).start(() => {
-          currentTranslateY.current = 0;
-        });
-      }
+      handleKeyboardHide
     );
 
     return () => {
-      showSubscription.remove();
-      hideSubscription.remove();
+      keyboardWillHide.remove();
     };
-  }, [visible, shouldRender]);
+  }, [visible, handleKeyboardHide]);
 
-  // PanResponder для свайпу вниз
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => enablePanDownToClose && visible,
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        return enablePanDownToClose && visible && Math.abs(gestureState.dy) > 5;
-      },
-      onPanResponderGrant: () => {
-        panStartY.current = currentTranslateY.current;
-        translateY.setOffset(currentTranslateY.current);
-        translateY.setValue(0);
-      },
-      onPanResponderMove: (_, gestureState) => {
-        const newTranslateY = panStartY.current + gestureState.dy;
-        
-        // Дозволяємо тільки рух вниз
-        if (newTranslateY >= 0) {
-          translateY.setValue(gestureState.dy);
-          
-          // Зменшуємо прозорість бекдропу при свайпі вниз
-          const progress = Math.min(newTranslateY / (sheetHeight || screenHeight), 1);
-          backdropOpacityAnim.setValue(backdropOpacity * (1 - progress));
-        }
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        translateY.flattenOffset();
-        const threshold = (sheetHeight || screenHeight) * 0.3; // 30% висоти для закриття
-        
-        if (gestureState.dy > threshold && enablePanDownToClose) {
-          // Закриваємо, якщо свайпнули достатньо вниз
-          setIsAnimating(true);
-          const closeHeight = sheetHeight > 0 ? sheetHeight : screenHeight;
-          Animated.parallel([
-            Animated.spring(translateY, {
-              toValue: closeHeight,
-              useNativeDriver: true,
-              tension: 50,
-              friction: 7,
-            }),
-            Animated.timing(backdropOpacityAnim, {
-              toValue: 0,
-              duration: 300,
-              useNativeDriver: true,
-            }),
-          ]).start(() => {
-            currentTranslateY.current = closeHeight;
-            setIsAnimating(false);
-            setShouldRender(false);
-            isRenderedRef.current = false;
-            handleClose();
-          });
-        } else {
-          // Повертаємо на місце
-          Animated.parallel([
-            Animated.spring(translateY, {
-              toValue: 0,
-              useNativeDriver: true,
-              tension: 50,
-              friction: 7,
-            }),
-            Animated.timing(backdropOpacityAnim, {
-              toValue: backdropOpacity,
-              duration: 300,
-              useNativeDriver: true,
-            }),
-          ]).start(() => {
-            currentTranslateY.current = 0;
-          });
-        }
-      },
-    })
-  ).current;
+  // Обробка змін стану bottom sheet
+  const handleSheetChanges = useCallback(
+    (index: number) => {
+      if (index === -1) {
+        // Bottom sheet закрито
+        onClose();
+      }
+    },
+    [onClose]
+  );
 
-  // Вимірювання висоти контенту
-  const handleContentLayout = (event: any) => {
-    const { height } = event.nativeEvent.layout;
-    const maxHeightPixels = screenHeight * maxHeight;
-    const minHeightPixels = minHeight;
-    
-    const calculatedHeight = Math.max(
-      minHeightPixels,
-      Math.min(height + insets.bottom, maxHeightPixels)
-    );
-    
-    setSheetHeight(calculatedHeight);
-  };
-
-  // Вимірювання висоти екрану
-  const handleScreenLayout = (event: any) => {
-    setScreenHeight(event.nativeEvent.layout.height);
-  };
-
-  if (!shouldRender) {
-    return null;
-  }
+  // Рендер бекдропу
+  const renderBackdrop = useCallback(
+    (props: any) => {
+      if (!enableBackdrop) {
+        return null;
+      }
+      return (
+        <BottomSheetBackdrop
+          {...props}
+          disappearsOnIndex={-1}
+          appearsOnIndex={0}
+          opacity={backdropOpacity}
+        />
+      );
+    },
+    [enableBackdrop, backdropOpacity]
+  );
 
   return (
-    <Modal
-      visible={shouldRender}
-      transparent
-      animationType="none"
-      statusBarTranslucent
-      onRequestClose={handleClose}
+    <BottomSheetModal
+      ref={bottomSheetModalRef}
+      snapPoints={defaultSnapPoints}
+      onChange={handleSheetChanges}
+      enablePanDownToClose={enablePanDownToClose}
+      backdropComponent={renderBackdrop}
+      keyboardBehavior="interactive"
+      keyboardBlurBehavior="restore"
+      android_keyboardInputMode="adjustResize"
+      enableDynamicSizing={false}
+      enableHandlePanningGesture={enablePanDownToClose}
+      enableContentPanningGesture={false}
+      activeOffsetY={[-1, 1]}
+      failOffsetX={[-5, 5]}
+      enableOverDrag={false}
+      animateOnMount={true}
+      topInset={insets.top}
+      maxDynamicContentSize={maxDynamicContentSize}
     >
-      <View style={styles.container} onLayout={handleScreenLayout}>
-        {/* Бекдроп */}
-        {enableBackdrop && (
-          <TouchableWithoutFeedback onPress={handleClose}>
-            <Animated.View
-              style={[
-                styles.backdrop,
-                {
-                  opacity: backdropOpacityAnim,
-                },
-              ]}
-            />
-          </TouchableWithoutFeedback>
-        )}
-
-        {/* BottomSheet */}
-        <Animated.View
-          style={[
-            styles.sheet,
-            {
-              paddingBottom: insets.bottom,
-              maxHeight: screenHeight * maxHeight,
-              transform: [{ translateY }],
-            },
-          ]}
-          {...panResponder.panHandlers}
-        >
-          {/* Індикатор свайпу */}
-          {enablePanDownToClose && (
-            <View style={styles.dragIndicator} />
-          )}
-
-          {/* Контент */}
-          <View
-            style={styles.content}
-            onLayout={handleContentLayout}
-          >
-            {children}
-          </View>
-        </Animated.View>
-      </View>
-    </Modal>
+      <BottomSheetView style={styles.contentContainer}>
+        {children}
+      </BottomSheetView>
+    </BottomSheetModal>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#000',
-  },
-  sheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: -2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    elevation: 10,
-  },
-  dragIndicator: {
-    width: 40,
-    height: 4,
-    backgroundColor: '#ccc',
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginTop: 8,
-    marginBottom: 8,
-  },
-  content: {
+  contentContainer: {
     flex: 1,
   },
 });
