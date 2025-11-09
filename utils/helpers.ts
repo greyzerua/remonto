@@ -42,10 +42,12 @@ export function formatDateShort(dateString: string): string {
  * Форматування суми грошей
  */
 export function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('uk-UA', {
-    style: 'currency',
-    currency: 'UAH',
-  }).format(amount);
+  const safeAmount = Number.isFinite(amount) ? amount : 0;
+
+  return `${safeAmount.toLocaleString('uk-UA', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })} грн`;
 }
 
 /**

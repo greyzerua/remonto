@@ -15,7 +15,6 @@ export interface Project {
   name: string;
   description?: string;
   status: ProjectStatus;
-  budget?: number; // Загальний бюджет проекту
   startDate?: string; // ISO date string
   endDate?: string; // ISO date string
   createdBy: string; // ID користувача, який створив
@@ -40,7 +39,6 @@ export interface Expense {
 export interface ProjectWithExpenses extends Project {
   totalExpenses: number; // Загальна сума витрат по проекту
   expensesCount: number; // Кількість витрат
-  remainingBudget?: number; // Залишок бюджету (якщо вказано)
 }
 
 export interface ExpenseByCategory {
@@ -54,7 +52,6 @@ export interface ProjectFormData {
   name: string;
   description?: string;
   status: ProjectStatus;
-  budget?: number;
   startDate?: string;
   endDate?: string;
 }

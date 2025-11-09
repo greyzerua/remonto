@@ -250,11 +250,11 @@ export default function ProjectsScreen() {
             />
           </View>
           <TouchableOpacity
-            style={[styles.themeToggleButton, { borderColor: theme.colors.border }]}
+            style={[styles.themeToggleButton]}
             onPress={toggleTheme}
             activeOpacity={0.8}
           >
-            <Text style={[styles.themeToggleIcon, { color: theme.colors.text }]}>
+            <Text style={[styles.themeToggleIcon]}>
               {theme.isDark ? '☀️' : '🌙'}
             </Text>
           </TouchableOpacity>
@@ -475,14 +475,11 @@ const createStyles = (colors: any) =>
     themeToggleButton: {
       width: 56,
       height: 56,
-      borderRadius: 28,
-      borderWidth: 1,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: 'transparent',
     },
     themeToggleIcon: {
-      fontSize: 26,
+      fontSize: 30,
     },
     loadingContainer: {
       flex: 1,

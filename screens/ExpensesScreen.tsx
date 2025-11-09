@@ -580,7 +580,7 @@ export default function ExpensesScreen() {
                           color: theme.colors.text,
                         },
                       ]}
-                      placeholder="Наприклад: Монтаж"
+                      placeholder="Наприклад: Монтаж кухні"
                       placeholderTextColor={theme.colors.textSecondary}
                       value={value ?? ''}
                       onChangeText={onChange}

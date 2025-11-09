@@ -5,6 +5,7 @@ import {
   onAuthStateChanged,
   User as FirebaseUser,
   updateProfile,
+  fetchSignInMethodsForEmail,
 } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
@@ -47,7 +48,19 @@ export async function registerUser(
 
     return user;
   } catch (error: any) {
-    console.error('Помилка реєстрації:', error);
+    if (error?.code !== 'auth/email-already-in-use') {
+      console.error('Помилка реєстрації:', error);
+    }
+    throw error;
+  }
+}
+
+export async function checkIfEmailExists(email: string): Promise<boolean> {
+  try {
+    const signInMethods = await fetchSignInMethodsForEmail(auth, email);
+    return signInMethods.length > 0;
+  } catch (error) {
+    console.error('Помилка перевірки email:', error);
     throw error;
   }
 }
