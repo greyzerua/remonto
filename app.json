@@ -9,16 +9,14 @@
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/transparent-logo.png",
-      "resizeMode": "cover",
-      "backgroundColor": "#E6ECF4"
+      "resizeMode": "cover"
     },
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/transparent-logo.png",
-        "backgroundColor": "#E6ECF4"
+        "foregroundImage": "./assets/transparent-logo.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
