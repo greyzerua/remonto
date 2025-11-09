@@ -172,7 +172,7 @@ familyGroups/
 projects/
   └── {projectId}/
       ├── id, familyGroupId, name, description, status,
-      ├── budget, startDate, endDate, createdBy, createdAt, updatedAt
+      ├── startDate, endDate, createdBy, createdAt, updatedAt
 
 expenses/
   └── {expenseId}/

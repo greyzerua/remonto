@@ -1,12 +1,14 @@
 import 'react-native-screens';
-import { StatusBar } from 'expo-status-bar';
+import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Platform, Image } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 import AuthScreen from './screens/AuthScreen';
 import ProjectsScreen from './screens/ProjectsScreen';
 import ExpensesScreen from './screens/ExpensesScreen';
@@ -16,11 +18,20 @@ const Tab = createBottomTabNavigator();
 
 function MainNavigator() {
   const { user, loading: authLoading } = useAuth();
+  const { theme } = useTheme();
 
   if (authLoading) {
     return (
-      <SafeAreaView style={styles.loadingContainer} edges={['top', 'bottom']}>
-        <ActivityIndicator size="large" color="#007AFF" />
+      <SafeAreaView
+        style={styles.splashContainer}
+        edges={['top', 'bottom']}
+      >
+        <Image
+          source={require('./assets/Splash-logo.png')}
+          style={styles.splashLogo}
+          resizeMode="contain"
+        />
+        <ActivityIndicator size="small" color="#1F2C3D" style={styles.splashSpinner} />
       </SafeAreaView>
     );
   }
@@ -33,19 +44,48 @@ function MainNavigator() {
     <Tab.Navigator
       screenOptions={{
         headerShown: true,
-        headerStatusBarHeight: 0, // Використовуємо SafeAreaView замість вбудованого padding
-        contentStyle: { flex: 1 },
-        tabBarActiveTintColor: '#007AFF',
-        tabBarInactiveTintColor: '#8E8E93',
+        headerStatusBarHeight: 0,
+        headerStyle: {
+          backgroundColor: theme.colors.surface,
+          elevation: 0,
+          shadowOpacity: 0,
+          borderBottomWidth: 0,
+        },
+        headerTintColor: theme.colors.text,
+        headerTitleStyle: {
+          color: theme.colors.text,
+        },
+        tabBarStyle: {
+          height: Platform.OS === 'ios' ? 70 : 64,
+          paddingBottom: Platform.OS === 'ios' ? 16 : 10,
+          paddingTop: 12,
+          marginBottom: Platform.OS === 'ios' ? 24 : 16,
+          backgroundColor: theme.colors.surface,
+          borderTopColor: theme.colors.border,
+          borderTopWidth: StyleSheet.hairlineWidth,
+        },
+        tabBarActiveTintColor: theme.isDark ? '#F7FAFF' : '#1F2937',
+        tabBarInactiveTintColor: theme.isDark ? 'rgba(226, 232, 240, 0.6)' : 'rgba(30, 27, 75, 0.55)',
+        tabBarLabelStyle: {
+          fontSize: 14,
+          fontWeight: '600',
+          marginBottom: Platform.OS === 'ios' ? 0 : 2,
+        },
       }}
     >
       <Tab.Screen
         name="Projects"
         component={ProjectsScreen}
         options={{
-          title: 'Проекти',
+          title: 'Проєкти',
           tabBarLabel: 'Проекти',
-          tabBarIcon: () => null,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons
+              name="briefcase-outline"
+              size={size + 2}
+              color={color}
+            />
+          ),
         }}
       />
       <Tab.Screen
@@ -54,7 +94,13 @@ function MainNavigator() {
         options={{
           title: 'Витрати',
           tabBarLabel: 'Витрати',
-          tabBarIcon: () => null,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons
+              name="calculator-outline"
+              size={size + 2}
+              color={color}
+            />
+          ),
         }}
       />
       <Tab.Screen
@@ -63,10 +109,62 @@ function MainNavigator() {
         options={{
           title: 'Налаштування',
           tabBarLabel: 'Налаштування',
-          tabBarIcon: () => null,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons
+              name="settings-outline"
+              size={size + 2}
+              color={color}
+            />
+          ),
         }}
       />
     </Tab.Navigator>
+  );
+}
+
+function AppContent() {
+  const { theme } = useTheme();
+
+  return (
+    <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
+      <NavigationContainer
+        theme={{
+          dark: theme.isDark,
+          colors: {
+            primary: theme.colors.primary,
+            background: theme.colors.background,
+            card: theme.colors.background,
+            text: theme.colors.text,
+            border: theme.colors.border,
+            notification: theme.colors.primary,
+          },
+          fonts: {
+            regular: {
+              fontFamily: 'System',
+              fontWeight: '400' as const,
+            },
+            medium: {
+              fontFamily: 'System',
+              fontWeight: '500' as const,
+            },
+            bold: {
+              fontFamily: 'System',
+              fontWeight: '700' as const,
+            },
+            heavy: {
+              fontFamily: 'System',
+              fontWeight: '800' as const,
+            },
+          },
+        }}
+      >
+      <ExpoStatusBar
+        style={theme.isDark ? 'light' : 'dark'}
+        backgroundColor={theme.colors.background}
+      />
+        <MainNavigator />
+      </NavigationContainer>
+    </View>
   );
 }
 
@@ -75,12 +173,11 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <BottomSheetModalProvider>
-          <AuthProvider>
-            <NavigationContainer>
-              <StatusBar style="auto" />
-              <MainNavigator />
-            </NavigationContainer>
-          </AuthProvider>
+          <ThemeProvider>
+            <AuthProvider>
+              <AppContent />
+            </AuthProvider>
+          </ThemeProvider>
         </BottomSheetModalProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
@@ -88,10 +185,18 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  loadingContainer: {
+  splashContainer: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    justifyContent: 'center',
+    backgroundColor: '#E6ECF4',
+  },
+  splashLogo: {
+    width: '70%',
+    maxWidth: 320,
+    aspectRatio: 1,
+  },
+  splashSpinner: {
+    marginTop: 32,
   },
 });
