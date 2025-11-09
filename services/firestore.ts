@@ -45,9 +45,6 @@ export async function createProject(
     if (formData.description) {
       project.description = formData.description;
     }
-    if (formData.budget !== undefined) {
-      project.budget = formData.budget;
-    }
     if (formData.startDate) {
       project.startDate = formData.startDate;
     }
@@ -78,9 +75,6 @@ export async function updateProject(projectId: string, formData: ProjectFormData
     // Додаємо опціональні поля тільки якщо вони існують
     if (formData.description !== undefined) {
       updateData.description = formData.description;
-    }
-    if (formData.budget !== undefined) {
-      updateData.budget = formData.budget;
     }
     if (formData.startDate !== undefined) {
       updateData.startDate = formData.startDate;
@@ -141,11 +135,11 @@ export async function getUserProjects(userId: string): Promise<Project[]> {
     );
     const querySnapshot = await getDocs(q);
     const projects = querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Project));
-    // Сортуємо на клієнті за датою створення (нові спочатку)
+    // Сортуємо на клієнті за датою створення (старіші спочатку)
     projects.sort((a, b) => {
       const dateA = new Date(a.createdAt).getTime();
       const dateB = new Date(b.createdAt).getTime();
-      return dateB - dateA;
+      return dateA - dateB;
     });
     return projects;
   } catch (error) {
@@ -172,11 +166,11 @@ export function subscribeToProjects(
         id: doc.id,
         ...doc.data(),
       })) as Project[];
-    // Сортуємо на клієнті за датою створення (нові спочатку)
+    // Сортуємо на клієнті за датою створення (старіші спочатку)
     projects.sort((a, b) => {
       const dateA = new Date(a.createdAt).getTime();
       const dateB = new Date(b.createdAt).getTime();
-      return dateB - dateA;
+      return dateA - dateB;
     });
     callback(projects);
   });
@@ -287,11 +281,11 @@ export async function getExpensesByProject(projectId: string, userId: string): P
     );
     const querySnapshot = await getDocs(q);
     const expenses = querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Expense));
-    // Сортуємо на клієнті за датою створення (нові спочатку)
+    // Сортуємо на клієнті за датою створення (старіші спочатку)
     expenses.sort((a, b) => {
       const dateA = new Date(a.createdAt).getTime();
       const dateB = new Date(b.createdAt).getTime();
-      return dateB - dateA;
+      return dateA - dateB;
     });
     return expenses;
   } catch (error) {
@@ -321,11 +315,11 @@ export function subscribeToExpenses(
       id: doc.id,
       ...doc.data(),
     })) as Expense[];
-    // Сортуємо на клієнті за датою створення (нові спочатку)
+    // Сортуємо на клієнті за датою створення (старіші спочатку)
     expenses.sort((a, b) => {
       const dateA = new Date(a.createdAt).getTime();
       const dateB = new Date(b.createdAt).getTime();
-      return dateB - dateA;
+      return dateA - dateB;
     });
     callback(expenses);
   });
