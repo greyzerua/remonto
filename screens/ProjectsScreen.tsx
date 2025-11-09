@@ -7,11 +7,15 @@ import {
   FlatList,
   Alert,
   ActivityIndicator,
-  TextInput,
-  ScrollView,
+  Image,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import { useForm, Controller } from 'react-hook-form';
+import { z } from 'zod';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from '../contexts/ThemeContext';
 import {
   subscribeToProjects,
   createProject,
@@ -20,25 +24,42 @@ import {
   getExpensesByProject,
 } from '../services/firestore';
 import { Project, ProjectFormData, ProjectStatus } from '../types';
-import { formatDateShort, formatCurrency, getStatusName } from '../utils/helpers';
+import { formatDateShort, getStatusName } from '../utils/helpers';
 import BottomSheet, { BottomSheetScrollView, BottomSheetTextInput } from '../components/BottomSheet';
+
+const projectSchema = z.object({
+  name: z.string().trim().min(1, 'Введіть назву проєкту'),
+  status: z.enum(['active', 'planned', 'paused', 'completed']),
+});
+
+type ProjectFormValues = z.infer<typeof projectSchema>;
 
 export default function ProjectsScreen() {
   const { user } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation<any>();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
-  const [formData, setFormData] = useState<ProjectFormData>({
-    name: '',
-    description: '',
-    status: 'active',
-    budget: undefined,
-    startDate: undefined,
-    endDate: undefined,
+  const {
+    control,
+    handleSubmit,
+    reset,
+    watch,
+    setValue,
+    setError,
+    clearErrors,
+    formState: { errors, isSubmitting },
+  } = useForm<ProjectFormValues>({
+    resolver: zodResolver(projectSchema),
+    defaultValues: {
+      name: '',
+      status: 'active',
+    },
   });
-  const [submitting, setSubmitting] = useState(false);
+  const selectedStatus = watch('status');
 
   useEffect(() => {
     if (!user) return;
@@ -53,31 +74,34 @@ export default function ProjectsScreen() {
 
   const handleCreateProject = () => {
     setEditingProject(null);
-    setFormData({
+    clearErrors();
+    reset({
       name: '',
-      description: '',
       status: 'active',
-      budget: undefined,
-      startDate: undefined,
-      endDate: undefined,
     });
     setModalVisible(true);
   };
 
   const handleEditProject = (project: Project) => {
     setEditingProject(project);
-    setFormData({
+    clearErrors();
+    reset({
       name: project.name,
-      description: project.description || '',
       status: project.status,
-      budget: project.budget,
-      startDate: project.startDate,
-      endDate: project.endDate,
     });
     setModalVisible(true);
   };
 
+  const handleOpenProject = (project: Project) => {
+    navigation.navigate('Expenses', { projectId: project.id });
+  };
+
   const handleDeleteProject = (project: Project) => {
+    if (!user) {
+      Alert.alert('Помилка', 'Помилка авторизації');
+      return;
+    }
+
     Alert.alert(
       'Видалити проект',
       `Ви впевнені, що хочете видалити проект "${project.name}"? Всі витрати також будуть видалені.`,
@@ -98,48 +122,55 @@ export default function ProjectsScreen() {
     );
   };
 
-  const handleSubmit = async () => {
-    if (!formData.name.trim()) {
-      Alert.alert('Помилка', 'Будь ласка, введіть назву проекту');
-      return;
-    }
-
+  const onSubmitProject = handleSubmit(async (values) => {
     if (!user) {
-      Alert.alert('Помилка', 'Помилка авторизації');
+      setError('name', { type: 'manual', message: 'Помилка авторизації. Спробуйте ще раз.' });
       return;
     }
 
-    setSubmitting(true);
+    const payload: ProjectFormData = {
+      name: values.name.trim(),
+      status: values.status,
+      startDate: editingProject?.startDate,
+      endDate: editingProject?.endDate,
+    };
+
     try {
       if (editingProject) {
-        await updateProject(editingProject.id, formData);
+        await updateProject(editingProject.id, payload);
       } else {
-        await createProject(formData, user.uid);
+        await createProject(payload, user.uid);
       }
       setModalVisible(false);
       setEditingProject(null);
+      reset({
+        name: '',
+        status: 'active',
+      });
     } catch (error) {
-      Alert.alert('Помилка', 'Не вдалося зберегти проект');
-    } finally {
-      setSubmitting(false);
+      setError('name', {
+        type: 'manual',
+        message: 'Не вдалося зберегти проєкт. Спробуйте ще раз.',
+      });
     }
-  };
+  });
 
   const renderProjectItem = ({ item }: { item: Project }) => {
     const statusColors: Record<ProjectStatus, string> = {
       active: '#34C759',
-      completed: '#007AFF',
+      completed: theme.colors.primary,
       paused: '#FF9500',
-      planned: '#8E8E93',
+      planned: theme.colors.textSecondary,
     };
+    const styles = createStyles(theme.colors);
 
     return (
       <TouchableOpacity
-        style={styles.projectCard}
-        onPress={() => handleEditProject(item)}
+        style={[styles.projectCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+        onPress={() => handleOpenProject(item)}
       >
         <View style={styles.projectHeader}>
-          <Text style={styles.projectName}>{item.name}</Text>
+          <Text style={[styles.projectName, { color: theme.colors.text }]}>{item.name}</Text>
           <View
             style={[
               styles.statusBadge,
@@ -155,19 +186,14 @@ export default function ProjectsScreen() {
         </View>
 
         {item.description && (
-          <Text style={styles.projectDescription} numberOfLines={2}>
+          <Text style={[styles.projectDescription, { color: theme.colors.textSecondary }]} numberOfLines={2}>
             {item.description}
           </Text>
         )}
 
         <View style={styles.projectInfo}>
-          {item.budget && (
-            <Text style={styles.projectBudget}>
-              Бюджет: {formatCurrency(item.budget)}
-            </Text>
-          )}
           {item.startDate && (
-            <Text style={styles.projectDate}>
+            <Text style={[styles.projectDate, { color: theme.colors.textSecondary }]}>
               Початок: {formatDateShort(item.startDate)}
             </Text>
           )}
@@ -175,416 +201,490 @@ export default function ProjectsScreen() {
 
         <View style={styles.projectActions}>
           <TouchableOpacity
-            style={styles.editButton}
+            style={[
+              styles.editButton,
+              {
+                backgroundColor: theme.isDark
+                  ? 'rgba(31, 44, 61, 0.55)'
+                  : theme.colors.primary,
+                borderColor: theme.isDark ? 'rgba(31, 44, 61, 0.65)' : theme.colors.primary,
+              },
+            ]}
             onPress={() => handleEditProject(item)}
           >
-            <Text style={styles.editButtonText}>Редагувати</Text>
+            <Text style={[styles.editButtonText, { color: theme.colors.primaryText }]}>Редагувати</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.deleteButton}
+            style={[styles.deleteButton, { backgroundColor: theme.colors.danger + '15' }]}
             onPress={() => handleDeleteProject(item)}
           >
-            <Text style={styles.deleteButtonText}>Видалити</Text>
+            <Text style={[styles.deleteButtonText, { color: theme.colors.danger }]}>Видалити</Text>
           </TouchableOpacity>
         </View>
       </TouchableOpacity>
     );
   };
 
+  const styles = createStyles(theme.colors);
+
   if (loading) {
     return (
-      <SafeAreaView style={styles.safeArea} edges={['bottom']}>
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.colors.background }]} edges={['bottom']}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#007AFF" />
-          <Text style={styles.loadingText}>Завантаження...</Text>
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+          <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Завантаження...</Text>
         </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['bottom']}>
-      <View style={styles.container}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.colors.background }]} edges={['bottom']}>
+      <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+        <View style={styles.header}>
+          <View style={styles.headerLeft}>
+            <Image
+              source={require('../assets/transparent-logo.png')}
+              style={styles.logo}
+              resizeMode="cover"
+            />
+          </View>
+          <TouchableOpacity
+            style={[styles.themeToggleButton, { borderColor: theme.colors.border }]}
+            onPress={toggleTheme}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.themeToggleIcon, { color: theme.colors.text }]}>
+              {theme.isDark ? '☀️' : '🌙'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {projects.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyTitle}>📋 Немає проектів</Text>
-            <Text style={styles.emptyText}>
+            <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>📋 Немає проектів</Text>
+            <Text style={[styles.emptyText, { color: theme.colors.textSecondary }]}>
               Створіть перший проект ремонту, щоб почати облік витрат
             </Text>
             <TouchableOpacity
-              style={styles.createButton}
+              style={[styles.createButton, { backgroundColor: theme.colors.primary }]}
               onPress={handleCreateProject}
             >
-              <Text style={styles.createButtonText}>Створити проект</Text>
+              <Text style={[styles.createButtonText, { color: theme.colors.primaryText }]}>Створити проект</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <>
-            <FlatList
-              data={projects}
-              renderItem={renderProjectItem}
-              keyExtractor={(item) => item.id}
-              contentContainerStyle={styles.listContent}
-              ListHeaderComponent={
-                <TouchableOpacity
-                  style={styles.addButton}
-                  onPress={handleCreateProject}
-                >
-                  <Text style={styles.addButtonText}>+ Додати проект</Text>
-                </TouchableOpacity>
-              }
-            />
+            <View style={styles.projectsListWrapper}>
+              <FlatList
+                data={projects}
+                renderItem={renderProjectItem}
+                keyExtractor={(item) => item.id}
+                contentContainerStyle={styles.listContent}
+              />
+            </View>
+
+            <View style={styles.bottomActionArea}>
+              <TouchableOpacity
+                style={[styles.addButton, { backgroundColor: theme.colors.primary }]}
+                onPress={handleCreateProject}
+              >
+                <Text style={[styles.addButtonText, { color: theme.colors.primaryText }]}>Додати проект</Text>
+              </TouchableOpacity>
+            </View>
           </>
         )}
 
-        {/* BottomSheet для створення/редагування */}
+     
         <BottomSheet
           visible={modalVisible}
           onClose={() => {
             setModalVisible(false);
             setEditingProject(null);
+            reset({
+              name: '',
+              status: 'active',
+            });
+            clearErrors();
           }}
           enablePanDownToClose={true}
           enableBackdrop={true}
           backdropOpacity={0.5}
+          snapPoints={[0.6]}
         >
-          <BottomSheetScrollView 
-            style={styles.bottomSheetContent} 
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={[
-              styles.bottomSheetScrollContent,
-              { paddingBottom: 200 + insets.bottom }
-            ]}
-            showsVerticalScrollIndicator={true}
-            bounces={false}
-          >
-            <Text style={styles.modalTitle}>
-              {editingProject ? 'Редагувати проект' : 'Новий проект'}
-            </Text>
+          <View style={styles.bottomSheetWrapper}>
+            <BottomSheetScrollView 
+              style={styles.bottomSheetContent} 
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.bottomSheetScrollContent}
+              showsVerticalScrollIndicator={true}
+              bounces={false}
+            >
+              <Text style={[styles.modalTitle, { color: theme.colors.text }]}>
+                {editingProject ? 'Редагувати проект' : 'Новий проект'}
+              </Text>
 
-                <View style={styles.inputContainer}>
-                  <Text style={styles.label}>Назва проекту *</Text>
-                  <BottomSheetTextInput
-                    style={styles.input}
-                    placeholder="Наприклад: Ремонт кухні"
-                    value={formData.name}
-                    onChangeText={(text) =>
-                      setFormData({ ...formData, name: text })
-                    }
-                  />
-                </View>
-
-                <View style={styles.inputContainer}>
-                  <Text style={styles.label}>Опис</Text>
-                  <BottomSheetTextInput
-                    style={[styles.input, styles.textArea]}
-                    placeholder="Опис проекту (опціонально)"
-                    value={formData.description}
-                    onChangeText={(text) =>
-                      setFormData({ ...formData, description: text })
-                    }
-                    multiline
-                    numberOfLines={3}
-                  />
-                </View>
-
-                <View style={styles.inputContainer}>
-                  <Text style={styles.label}>Статус</Text>
-                  <View style={styles.statusButtons}>
-                    {(['active', 'planned', 'paused', 'completed'] as ProjectStatus[]).map(
-                      (status) => (
-                        <TouchableOpacity
-                          key={status}
+                  <View style={styles.inputContainer}>
+                    <Text style={[styles.label, { color: theme.colors.text }]}>Назва проєкту *</Text>
+                    <Controller
+                      control={control}
+                      name="name"
+                      render={({ field: { value, onChange, onBlur } }) => (
+                        <BottomSheetTextInput
                           style={[
-                            styles.statusButton,
-                            formData.status === status && styles.statusButtonActive,
+                            styles.input,
+                            {
+                              backgroundColor: theme.colors.surface,
+                              borderColor: errors.name ? theme.colors.danger : theme.colors.border,
+                              color: theme.colors.text,
+                            },
                           ]}
-                          onPress={() => setFormData({ ...formData, status })}
-                        >
-                          <Text
-                            style={[
-                              styles.statusButtonText,
-                              formData.status === status &&
-                                styles.statusButtonTextActive,
-                            ]}
-                          >
-                            {getStatusName(status)}
-                          </Text>
-                        </TouchableOpacity>
-                      )
+                          placeholder="Наприклад: Ремонт кухні"
+                          placeholderTextColor={theme.colors.textSecondary}
+                          value={value ?? ''}
+                          onChangeText={onChange}
+                          onBlur={onBlur}
+                        />
+                      )}
+                    />
+                    {errors.name && (
+                      <Text style={[styles.errorText, { color: theme.colors.danger }]}>
+                        {errors.name.message}
+                      </Text>
                     )}
                   </View>
-                </View>
 
-                <View style={styles.inputContainer}>
-                  <Text style={styles.label}>Бюджет (₴)</Text>
-                  <BottomSheetTextInput
-                    style={styles.input}
-                    placeholder="0"
-                    value={formData.budget?.toString() || ''}
-                    onChangeText={(text) => {
-                      const num = parseFloat(text);
-                      setFormData({
-                        ...formData,
-                        budget: isNaN(num) ? undefined : num,
-                      });
-                    }}
-                    keyboardType="numeric"
-                  />
-                </View>
+                  <View style={styles.inputContainer}>
+                    <Text style={[styles.label, { color: theme.colors.text }]}>Статус</Text>
+                    <View style={styles.statusButtons}>
+                      {(['active', 'planned', 'paused', 'completed'] as ProjectStatus[]).map(
+                        (status) => (
+                          <TouchableOpacity
+                            key={status}
+                            style={[
+                              styles.statusButton,
+                              {
+                                backgroundColor: theme.colors.surface,
+                                borderColor: selectedStatus === status ? theme.colors.primary : theme.colors.border,
+                              },
+                              selectedStatus === status && [
+                                styles.statusButtonActive,
+                                { backgroundColor: theme.colors.primary },
+                              ],
+                            ]}
+                            onPress={() => setValue('status', status, { shouldValidate: true })}
+                          >
+                            <Text
+                              style={[
+                                styles.statusButtonText,
+                                { color: selectedStatus === status ? theme.colors.primaryText : theme.colors.textSecondary },
+                              ]}
+                            >
+                              {getStatusName(status)}
+                            </Text>
+                          </TouchableOpacity>
+                        )
+                      )}
+                    </View>
+                    {errors.status && (
+                      <Text style={[styles.errorText, { color: theme.colors.danger }]}>
+                        {errors.status.message}
+                      </Text>
+                    )}
+                  </View>
+            </BottomSheetScrollView>
 
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => {
-                  setModalVisible(false);
-                  setEditingProject(null);
-                }}
-              >
-                <Text style={styles.cancelButtonText}>Скасувати</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.saveButton]}
-                onPress={handleSubmit}
-                disabled={submitting}
-              >
-                {submitting ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.saveButtonText}>Зберегти</Text>
-                )}
-              </TouchableOpacity>
+            <View
+              style={[
+                styles.bottomSheetActionsContainer,
+                {
+                  borderTopColor: theme.colors.border,
+                  backgroundColor: theme.colors.surface,
+                  paddingBottom: insets.bottom + 16,
+                },
+              ]}
+            >
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={[
+                    styles.modalButton,
+                    styles.cancelButton,
+                    {
+                      backgroundColor: theme.isDark 
+                        ? 'rgba(51, 65, 85, 0.5)' // Світліший темно-сірий для темної теми
+                        : '#f1f5f9', // Світло-сірий для світлої теми
+                      borderColor: theme.colors.border,
+                    },
+                  ]}
+                  onPress={() => {
+                    setModalVisible(false);
+                    setEditingProject(null);
+                  reset({
+                    name: '',
+                    status: 'active',
+                  });
+                  clearErrors();
+                  }}
+                >
+                  <Text style={[styles.cancelButtonText, { color: theme.colors.text }]}>Скасувати</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.saveButton, { backgroundColor: theme.colors.primary }]}
+                  onPress={onSubmitProject}
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? (
+                    <ActivityIndicator color={theme.colors.primaryText} />
+                  ) : (
+                    <Text style={[styles.saveButtonText, { color: theme.colors.primaryText }]}>Зберегти</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
-            <View style={{ height: 100 }} />
-          </BottomSheetScrollView>
+          </View>
         </BottomSheet>
       </View>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 10,
-    color: '#666',
-  },
-  listContent: {
-    padding: 16,
-  },
-  addButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  addButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  projectCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  projectHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  projectName: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    flex: 1,
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  projectDescription: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 12,
-  },
-  projectInfo: {
-    marginBottom: 12,
-  },
-  projectBudget: {
-    fontSize: 14,
-    color: '#333',
-    fontWeight: '500',
-    marginBottom: 4,
-  },
-  projectDate: {
-    fontSize: 12,
-    color: '#999',
-  },
-  projectActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  editButton: {
-    flex: 1,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 8,
-    padding: 10,
-    alignItems: 'center',
-  },
-  editButtonText: {
-    color: '#007AFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  deleteButton: {
-    flex: 1,
-    backgroundColor: '#ffebee',
-    borderRadius: 8,
-    padding: 10,
-    alignItems: 'center',
-  },
-  deleteButtonText: {
-    color: '#ff3b30',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  emptyTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 12,
-    color: '#333',
-  },
-  emptyText: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  createButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-    padding: 16,
-    paddingHorizontal: 32,
-  },
-  createButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  bottomSheetContent: {
-    flex: 1,
-  },
-  bottomSheetScrollContent: {
-    padding: 20,
-    paddingBottom: 120,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 20,
-    color: '#333',
-  },
-  inputContainer: {
-    marginBottom: 20,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 8,
-    color: '#333',
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    backgroundColor: '#f9f9f9',
-  },
-  textArea: {
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  statusButtons: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  statusButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    backgroundColor: '#f9f9f9',
-  },
-  statusButtonActive: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
-  },
-  statusButtonText: {
-    fontSize: 14,
-    color: '#666',
-  },
-  statusButtonTextActive: {
-    color: '#fff',
-    fontWeight: '600',
-  },
-  modalActions: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 20,
-    marginBottom: 20,
-  },
-  modalButton: {
-    flex: 1,
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-  },
-  cancelButton: {
-    backgroundColor: '#f0f0f0',
-  },
-  cancelButtonText: {
-    color: '#666',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  saveButton: {
-    backgroundColor: '#007AFF',
-  },
-  saveButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-});
+const createStyles = (colors: any) =>
+  StyleSheet.create({
+    safeArea: {
+      flex: 1,
+    },
+    container: {
+      flex: 1,
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 12,
+      paddingHorizontal: 20,
+    },
+    headerLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    logo: {
+      width: 270,
+      height: 44,
+    },
+    themeToggleButton: {
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      borderWidth: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'transparent',
+    },
+    themeToggleIcon: {
+      fontSize: 26,
+    },
+    loadingContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    loadingText: {
+      marginTop: 10,
+    },
+    listContent: {
+      padding: 16,
+      paddingBottom: 24,
+    },
+    projectsListWrapper: {
+      flex: 1,
+    },
+    bottomActionArea: {
+      paddingHorizontal: 20,
+      paddingTop: 16,
+  
+    },
+    addButton: {
+      borderRadius: 8,
+      padding: 16,
+      alignItems: 'center',
+    },
+    addButtonText: {
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    projectCard: {
+      borderRadius: 12,
+      padding: 16,
+      borderWidth: 1,
+    },
+    projectHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    projectName: {
+      fontSize: 18,
+      fontWeight: '600',
+      flex: 1,
+    },
+    statusBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 12,
+    },
+    statusText: {
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    projectDescription: {
+      fontSize: 14,
+      marginBottom: 12,
+    },
+    projectInfo: {
+      marginBottom: 12,
+    },
+    projectDate: {
+      fontSize: 12,
+    },
+    projectActions: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    editButton: {
+      flex: 1,
+      borderRadius: 8,
+      padding: 10,
+      alignItems: 'center',
+      borderWidth: 1,
+    },
+    editButtonText: {
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    deleteButton: {
+      flex: 1,
+      borderRadius: 8,
+      padding: 10,
+      alignItems: 'center',
+    },
+    deleteButtonText: {
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    emptyContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 20,
+    },
+    emptyTitle: {
+      fontSize: 24,
+      fontWeight: 'bold',
+      marginBottom: 12,
+    },
+    emptyText: {
+      fontSize: 16,
+      textAlign: 'center',
+      marginBottom: 24,
+    },
+    createButton: {
+      borderRadius: 8,
+      padding: 16,
+      paddingHorizontal: 32,
+    },
+    createButtonText: {
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    bottomSheetContent: {
+      flex: 1,
+    
+    },
+    bottomSheetScrollContent: {
+      padding: 20,
+
+    },
+    bottomSheetWrapper: {
+      flex: 1,
+     
+    },
+    bottomSheetActionsContainer: {
+      paddingHorizontal: 20,
+      paddingTop: 16,
+    },
+    modalTitle: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      marginBottom: 20,
+    },
+    inputContainer: {
+      marginBottom: 20,
+    },
+    label: {
+      fontSize: 14,
+      fontWeight: '600',
+      marginBottom: 8,
+    },
+    input: {
+      borderWidth: 1,
+      borderRadius: 8,
+      padding: 12,
+      fontSize: 16,
+    },
+    textArea: {
+      minHeight: 80,
+      textAlignVertical: 'top',
+    },
+    statusButtons: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    statusButton: {
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 8,
+      borderWidth: 1,
+    },
+    statusButtonActive: {
+      borderColor: colors.primary,
+    },
+    statusButtonText: {
+      fontSize: 14,
+    },
+    statusButtonTextActive: {
+      fontWeight: '600',
+    },
+    modalActions: {
+      flexDirection: 'row',
+  
+      gap: 12,
+      marginTop: 20,
+      marginBottom: 20,
+    },
+    modalButton: {
+      flex: 1,
+      borderRadius: 8,
+      padding: 16,
+      alignItems: 'center',
+    },
+    cancelButton: {
+      borderWidth: 1,
+    },
+    cancelButtonText: {
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    saveButton: {
+    },
+    saveButtonText: {
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    errorText: {
+      fontSize: 12,
+      marginTop: 6,
+    },
+  });

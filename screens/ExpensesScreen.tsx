@@ -11,7 +11,12 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import { useForm, Controller } from 'react-hook-form';
+import { z } from 'zod';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from '../contexts/ThemeContext';
 import {
   subscribeToProjects,
   subscribeToExpenses,
@@ -23,26 +28,93 @@ import { Project, Expense, ExpenseFormData } from '../types';
 import { formatCurrency } from '../utils/helpers';
 import BottomSheet, { BottomSheetScrollView, BottomSheetTextInput } from '../components/BottomSheet';
 
+const normalizeAmount = (value: string) => {
+  if (value === undefined || value === null) {
+    return NaN;
+  }
+
+  const normalized = value.replace(',', '.');
+  const parsed = parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : NaN;
+};
+
+const amountField = z
+  .string()
+  .trim()
+  .refine((val) => val === '' || !Number.isNaN(normalizeAmount(val)), {
+    message: 'Некоректне число',
+  })
+  .refine((val) => val === '' || normalizeAmount(val) >= 0, {
+    message: 'Сума не може бути відʼємною',
+  });
+
+const expenseSchema = z
+  .object({
+    categoryName: z.string().trim().min(1, 'Введіть назву категорії'),
+    labor: amountField,
+    materials: amountField,
+  })
+  .superRefine((data, ctx) => {
+    const laborValue = normalizeAmount(data.labor);
+    const materialsValue = normalizeAmount(data.materials);
+    const safeLabor = Number.isNaN(laborValue) ? 0 : laborValue;
+    const safeMaterials = Number.isNaN(materialsValue) ? 0 : materialsValue;
+
+    if (safeLabor <= 0 && safeMaterials <= 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['materials'],
+        message: 'Введіть хоча б одну суму',
+      });
+    }
+  });
+
+type ExpenseFormValues = z.infer<typeof expenseSchema>;
+
 export default function ExpensesScreen() {
   const { user } = useAuth();
+  const { theme } = useTheme();
   const insets = useSafeAreaInsets();
+  const route = useRoute<any>();
+  const navigation = useNavigation<any>();
+  const projectIdFromParams = route.params?.projectId as string | undefined;
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
-  const [formData, setFormData] = useState<ExpenseFormData>({
-    projectId: '',
-    categoryName: '',
-    labor: 0,
-    materials: 0,
-    description: '',
+  const {
+    control,
+    handleSubmit: handleExpenseSubmit,
+    reset,
+    watch,
+    setError,
+    clearErrors,
+    formState: { errors, isSubmitting },
+  } = useForm<ExpenseFormValues>({
+    resolver: zodResolver(expenseSchema),
+    defaultValues: {
+      categoryName: '',
+      labor: '',
+      materials: '',
+    },
   });
-  const [submitting, setSubmitting] = useState(false);
+  const watchLabor = watch('labor');
+  const watchMaterials = watch('materials');
+  const laborAmountForSummary = (() => {
+    const parsed = normalizeAmount(watchLabor || '');
+    return Number.isNaN(parsed) ? 0 : parsed;
+  })();
+  const materialsAmountForSummary = (() => {
+    const parsed = normalizeAmount(watchMaterials || '');
+    return Number.isNaN(parsed) ? 0 : parsed;
+  })();
+  const modalTotalAmount = laborAmountForSummary + materialsAmountForSummary;
 
   // Локальні стани для редагування прямо в списку
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [editingCategoryName, setEditingCategoryName] = useState<string>('');
   const [editingLabor, setEditingLabor] = useState<string>('');
   const [editingMaterials, setEditingMaterials] = useState<string>('');
 
@@ -52,15 +124,35 @@ export default function ExpensesScreen() {
     const unsubscribe = subscribeToProjects(user.uid, (updatedProjects) => {
       setProjects(updatedProjects);
       setLoading(false);
-      
-      // Автоматично вибираємо перший проєкт, якщо немає обраного
-      if (!selectedProject && updatedProjects.length > 0) {
-        setSelectedProject(updatedProjects[0]);
-      }
     });
 
     return () => unsubscribe();
   }, [user]);
+
+  useEffect(() => {
+    if (!projects.length) {
+      setSelectedProject(null);
+      return;
+    }
+
+    if (projectIdFromParams) {
+      const projectFromParams = projects.find((project) => project.id === projectIdFromParams);
+      if (projectFromParams && selectedProject?.id !== projectFromParams.id) {
+        setSelectedProject(projectFromParams);
+        navigation.setParams({ projectId: undefined });
+        return;
+      }
+    }
+
+    if (selectedProject) {
+      const stillExists = projects.some((project) => project.id === selectedProject.id);
+      if (!stillExists) {
+        setSelectedProject(projects[0]);
+      }
+    } else {
+      setSelectedProject(projects[0]);
+    }
+  }, [projects, projectIdFromParams, selectedProject, navigation]);
 
   useEffect(() => {
     if (!selectedProject || !user) return;
@@ -74,29 +166,26 @@ export default function ExpensesScreen() {
 
   const handleCreateExpense = () => {
     if (!selectedProject) {
-      Alert.alert('Помилка', 'Будь ласка, спочатку виберіть проєкт');
       return;
     }
 
     setEditingExpense(null);
-    setFormData({
-      projectId: selectedProject.id,
+    clearErrors();
+    reset({
       categoryName: '',
-      labor: 0,
-      materials: 0,
-      description: '',
+      labor: '',
+      materials: '',
     });
     setModalVisible(true);
   };
 
   const handleEditExpense = (expense: Expense) => {
     setEditingExpense(expense);
-    setFormData({
-      projectId: expense.projectId,
+    clearErrors();
+    reset({
       categoryName: expense.categoryName,
-      labor: expense.labor,
-      materials: expense.materials,
-      description: expense.description || '',
+      labor: expense.labor > 0 ? expense.labor.toString() : '',
+      materials: expense.materials > 0 ? expense.materials.toString() : '',
     });
     setModalVisible(true);
   };
@@ -122,50 +211,58 @@ export default function ExpensesScreen() {
     );
   };
 
-  const handleSubmit = async () => {
-    if (!formData.categoryName.trim()) {
-      Alert.alert('Помилка', 'Будь ласка, введіть назву категорії');
+  const onSubmitExpense = handleExpenseSubmit(async (values) => {
+    if (!selectedProject || !user) {
+      setError('categoryName', { type: 'manual', message: 'Помилка авторизації. Спробуйте ще раз.' });
       return;
     }
 
-    if (formData.labor < 0 || formData.materials < 0) {
-      Alert.alert('Помилка', 'Сума не може бути від\'ємною');
-      return;
-    }
+    const laborAmountRaw = normalizeAmount(values.labor);
+    const materialsAmountRaw = normalizeAmount(values.materials);
+    const laborAmount = Number.isNaN(laborAmountRaw) ? 0 : laborAmountRaw;
+    const materialsAmount = Number.isNaN(materialsAmountRaw) ? 0 : materialsAmountRaw;
 
-    if (formData.labor === 0 && formData.materials === 0) {
-      Alert.alert('Помилка', 'Введіть хоча б одну суму');
-      return;
-    }
+    const payload: ExpenseFormData = {
+      projectId: selectedProject.id,
+      categoryName: values.categoryName.trim(),
+      labor: laborAmount,
+      materials: materialsAmount,
+    };
 
-    if (!user) {
-      Alert.alert('Помилка', 'Помилка авторизації');
-      return;
-    }
-
-    setSubmitting(true);
     try {
       if (editingExpense) {
-        await updateExpense(editingExpense.id, formData);
+        await updateExpense(editingExpense.id, payload);
       } else {
-        await createExpense(formData, user.uid);
+        await createExpense(payload, user.uid);
       }
       setModalVisible(false);
       setEditingExpense(null);
+      reset({
+        categoryName: '',
+        labor: '',
+        materials: '',
+      });
     } catch (error) {
-      Alert.alert('Помилка', 'Не вдалося зберегти категорію');
-    } finally {
-      setSubmitting(false);
+      setError('categoryName', {
+        type: 'manual',
+        message: 'Не вдалося зберегти категорію. Спробуйте ще раз.',
+      });
     }
-  };
+  });
 
   const handleInlineEditStart = (expense: Expense) => {
     setEditingCategoryId(expense.id);
+    setEditingCategoryName(expense.categoryName);
     setEditingLabor(expense.labor > 0 ? expense.labor.toString() : '');
     setEditingMaterials(expense.materials > 0 ? expense.materials.toString() : '');
   };
 
   const handleInlineEditSave = async (expense: Expense) => {
+    if (!editingCategoryName.trim()) {
+      Alert.alert('Помилка', 'Будь ласка, введіть назву категорії');
+      return;
+    }
+
     const labor = parseFloat(editingLabor) || 0;
     const materials = parseFloat(editingMaterials) || 0;
 
@@ -177,12 +274,13 @@ export default function ExpensesScreen() {
     try {
       await updateExpense(expense.id, {
         projectId: expense.projectId,
-        categoryName: expense.categoryName,
+        categoryName: editingCategoryName.trim(),
         labor,
         materials,
         description: expense.description,
       });
       setEditingCategoryId(null);
+      setEditingCategoryName('');
     } catch (error) {
       Alert.alert('Помилка', 'Не вдалося зберегти зміни');
     }
@@ -190,6 +288,7 @@ export default function ExpensesScreen() {
 
   const handleInlineEditCancel = () => {
     setEditingCategoryId(null);
+    setEditingCategoryName('');
     setEditingLabor('');
     setEditingMaterials('');
   };
@@ -197,62 +296,94 @@ export default function ExpensesScreen() {
   // Підрахунок загальної суми всіх категорій
   const totalAmount = expenses.reduce((sum, expense) => sum + expense.labor + expense.materials, 0);
 
+  const styles = createStyles(theme.colors);
+
   const renderExpenseItem = ({ item }: { item: Expense }) => {
     const isEditing = editingCategoryId === item.id;
     const categoryTotal = item.labor + item.materials;
 
     return (
-      <View style={styles.expenseCard}>
-        {/* Назва категорії по центру, жирним */}
-        <Text style={styles.expenseCategoryName}>{item.categoryName}</Text>
+      <View style={[styles.expenseCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+        {/* Назва категорії */}
+        {isEditing ? (
+          <TextInput
+            style={[
+              styles.expenseCategoryInput,
+              {
+                backgroundColor: theme.colors.surface,
+                borderColor: theme.colors.border,
+                color: theme.colors.text,
+              },
+            ]}
+            placeholder="Назва категорії"
+            placeholderTextColor={theme.colors.textSecondary}
+            value={editingCategoryName}
+            onChangeText={setEditingCategoryName}
+          />
+        ) : (
+          <Text style={[styles.expenseCategoryName, { color: theme.colors.text }]}>{item.categoryName}</Text>
+        )}
 
         {isEditing ? (
           // Режим редагування
           <>
             <View style={styles.inputRow}>
-              <Text style={styles.inputLabel}>🔹 Робота</Text>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>🔹 Робота</Text>
               <TextInput
-                style={styles.inlineInput}
+                style={[styles.inlineInput, { 
+                  backgroundColor: theme.colors.surface, 
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text 
+                }]}
                 placeholder="0"
+                placeholderTextColor={theme.colors.textSecondary}
                 value={editingLabor}
                 onChangeText={setEditingLabor}
                 keyboardType="numeric"
                 autoFocus
               />
-              <Text style={styles.currencyLabel}>грн</Text>
+              <Text style={[styles.currencyLabel, { color: theme.colors.textSecondary }]}>грн</Text>
             </View>
 
             <View style={styles.inputRow}>
-              <Text style={styles.inputLabel}>🔹 Матеріали</Text>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>🔹 Матеріали</Text>
               <TextInput
-                style={styles.inlineInput}
+                style={[styles.inlineInput, { 
+                  backgroundColor: theme.colors.surface, 
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text 
+                }]}
                 placeholder="0"
+                placeholderTextColor={theme.colors.textSecondary}
                 value={editingMaterials}
                 onChangeText={setEditingMaterials}
                 keyboardType="numeric"
               />
-              <Text style={styles.currencyLabel}>грн</Text>
+              <Text style={[styles.currencyLabel, { color: theme.colors.textSecondary }]}>грн</Text>
             </View>
 
-            <View style={styles.categoryTotalRow}>
-              <Text style={styles.categoryTotalLabel}>Разом:</Text>
-              <Text style={styles.categoryTotalAmount}>
-                {formatCurrency((parseFloat(editingLabor) || 0) + (parseFloat(editingMaterials) || 0))} грн
+            <View style={[styles.categoryTotalRow, { borderTopColor: theme.colors.border }]}>
+              <Text style={[styles.categoryTotalLabel, { color: theme.colors.text }]}>Разом:</Text>
+              <Text style={[styles.categoryTotalAmount, { color: theme.colors.primaryText }]}>
+                {formatCurrency((parseFloat(editingLabor) || 0) + (parseFloat(editingMaterials) || 0))}
               </Text>
             </View>
 
             <View style={styles.inlineEditActions}>
               <TouchableOpacity
-                style={styles.inlineSaveButton}
+                style={[styles.inlineSaveButton, { backgroundColor: theme.colors.primary }]}
                 onPress={() => handleInlineEditSave(item)}
               >
-                <Text style={styles.inlineSaveButtonText}>Зберегти</Text>
+                <Text style={[styles.inlineSaveButtonText, { color: theme.colors.primaryText }]}>Зберегти</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.inlineCancelButton}
+                style={[
+                  styles.inlineCancelButton,
+                  { backgroundColor: theme.colors.danger + '15' },
+                ]}
                 onPress={handleInlineEditCancel}
               >
-                <Text style={styles.inlineCancelButtonText}>Скасувати</Text>
+                <Text style={[styles.inlineCancelButtonText, { color: theme.colors.danger }]}>Скасувати</Text>
               </TouchableOpacity>
             </View>
           </>
@@ -260,32 +391,40 @@ export default function ExpensesScreen() {
           // Режим перегляду
           <>
             <View style={styles.inputRow}>
-              <Text style={styles.inputLabel}>🔹 Робота</Text>
-              <Text style={styles.inputValue}>{formatCurrency(item.labor)} грн</Text>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>🔹 Робота</Text>
+              <Text style={[styles.inputValue, { color: theme.colors.primaryText }]}>{formatCurrency(item.labor)}</Text>
             </View>
 
             <View style={styles.inputRow}>
-              <Text style={styles.inputLabel}>🔹 Матеріали</Text>
-              <Text style={styles.inputValue}>{formatCurrency(item.materials)} грн</Text>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>🔹 Матеріали</Text>
+              <Text style={[styles.inputValue, { color: theme.colors.primaryText }]}>{formatCurrency(item.materials)}</Text>
             </View>
 
-            <View style={styles.categoryTotalRow}>
-              <Text style={styles.categoryTotalLabel}>Разом:</Text>
-              <Text style={styles.categoryTotalAmount}>{formatCurrency(categoryTotal)} грн</Text>
+            <View style={[styles.categoryTotalRow, { borderTopColor: theme.colors.border }]}>
+              <Text style={[styles.categoryTotalLabel, { color: theme.colors.text }]}>Разом:</Text>
+              <Text style={[styles.categoryTotalAmount, { color: theme.colors.primaryText }]}>{formatCurrency(categoryTotal)}</Text>
             </View>
 
             <View style={styles.expenseActions}>
               <TouchableOpacity
-                style={styles.editButton}
+              style={[
+                styles.editButton,
+                {
+                  backgroundColor: theme.isDark
+                    ? 'rgba(31, 44, 61, 0.55)'
+                    : theme.colors.primary,
+                  borderColor: theme.isDark ? 'rgba(31, 44, 61, 0.65)' : theme.colors.primary,
+                },
+              ]}
                 onPress={() => handleInlineEditStart(item)}
               >
-                <Text style={styles.editButtonText}>Редагувати</Text>
+              <Text style={[styles.editButtonText, { color: theme.colors.primaryText }]}>Редагувати</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.deleteButton}
+                style={[styles.deleteButton, { backgroundColor: theme.colors.danger + '15' }]}
                 onPress={() => handleDeleteExpense(item)}
               >
-                <Text style={styles.deleteButtonText}>Видалити</Text>
+                <Text style={[styles.deleteButtonText, { color: theme.colors.danger }]}>Видалити</Text>
               </TouchableOpacity>
             </View>
           </>
@@ -296,49 +435,51 @@ export default function ExpensesScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.safeArea} edges={['bottom']}>
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.colors.background }]} edges={['bottom']}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#007AFF" />
-          <Text style={styles.loadingText}>Завантаження...</Text>
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+          <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Завантаження...</Text>
         </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['bottom']}>
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.title}>💰 Витрати на ремонт</Text>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.colors.background }]} edges={['bottom']}>
+      <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+        <View style={[styles.header]}>
+          <Text style={[styles.title, { color: theme.colors.text, textAlign: 'center' }]}>Витрати на ремонт</Text>
           {selectedProject && (
-            <Text style={styles.subtitle}>Проєкт: {selectedProject.name}</Text>
+            <Text style={[styles.subtitle, { color: theme.colors.textSecondary, textAlign: 'center' }]}>Проєкт: {selectedProject.name}</Text>
           )}
         </View>
 
         {projects.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>
+            <Text style={[styles.emptyText, { color: theme.colors.textSecondary }]}>
               Спочатку створіть проєкт на вкладці "Проекти"
             </Text>
           </View>
         ) : (
           <>
             {projects.length > 1 && (
-              <View style={styles.projectSelector}>
+              <View style={[styles.projectSelector, { backgroundColor: theme.colors.surface, borderBottomColor: theme.colors.border }]}>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                   {projects.map((project) => (
                     <TouchableOpacity
                       key={project.id}
                       style={[
                         styles.projectButton,
-                        selectedProject?.id === project.id && styles.projectButtonActive,
+                        { backgroundColor: theme.colors.surface },
+                        selectedProject?.id === project.id && [styles.projectButtonActive, { backgroundColor: theme.colors.primary }],
                       ]}
                       onPress={() => setSelectedProject(project)}
                     >
                       <Text
                         style={[
                           styles.projectButtonText,
-                          selectedProject?.id === project.id && styles.projectButtonTextActive,
+                          { color: theme.colors.textSecondary },
+                          selectedProject?.id === project.id && [styles.projectButtonTextActive, { color: theme.colors.primaryText }],
                         ]}
                       >
                         {project.name}
@@ -353,37 +494,39 @@ export default function ExpensesScreen() {
               <>
                 {expenses.length === 0 ? (
                   <View style={styles.emptyContainer}>
-                    <Text style={styles.emptyText}>
+                    <Text style={[styles.emptyText, { color: theme.colors.textSecondary }]}>
                       Немає категорій витрат. Додайте першу категорію
                     </Text>
                     <TouchableOpacity
-                      style={styles.createButton}
+                      style={[styles.createButton, { backgroundColor: theme.colors.primary }]}
                       onPress={handleCreateExpense}
                     >
-                      <Text style={styles.createButtonText}>Додати категорію</Text>
+                      <Text style={[styles.createButtonText, { color: theme.colors.primaryText }]}>Додати категорію</Text>
                     </TouchableOpacity>
                   </View>
                 ) : (
                   <>
-                    <FlatList
-                      data={expenses}
-                      renderItem={renderExpenseItem}
-                      keyExtractor={(item) => item.id}
-                      contentContainerStyle={styles.listContent}
-                      ListHeaderComponent={
-                        <TouchableOpacity
-                          style={styles.addButton}
-                          onPress={handleCreateExpense}
-                        >
-                          <Text style={styles.addButtonText}>+ Додати категорію</Text>
-                        </TouchableOpacity>
-                      }
-                    />
-                    
-                    {/* Загальна сума по проєкту */}
-                    <View style={styles.projectTotalContainer}>
-                      <Text style={styles.projectTotalLabel}>Разом по проєкту:</Text>
-                      <Text style={styles.projectTotalAmount}>{formatCurrency(totalAmount)} грн</Text>
+                    <View style={styles.expensesListWrapper}>
+                      <FlatList
+                        data={expenses}
+                        renderItem={renderExpenseItem}
+                        keyExtractor={(item) => item.id}
+                        contentContainerStyle={styles.listContent}
+                      />
+                    </View>
+
+                    <View style={styles.bottomActionArea}>
+                      <TouchableOpacity
+                        style={[styles.addButton, { backgroundColor: theme.colors.primary }]}
+                        onPress={handleCreateExpense}
+                      >
+                        <Text style={[styles.addButtonText, { color: theme.colors.primaryText }]}>Додати категорію</Text>
+                      </TouchableOpacity>
+
+                      <View style={[styles.projectTotalContainer, { borderTopColor: theme.colors.primary }]}>
+                        <Text style={[styles.projectTotalLabel, { color: theme.colors.text }]}>Разом по проєкту:</Text>
+                        <Text style={[styles.projectTotalAmount, { color: theme.colors.primaryText }]}>{formatCurrency(totalAmount)}</Text>
+                      </View>
                     </View>
                   </>
                 )}
@@ -398,450 +541,487 @@ export default function ExpensesScreen() {
           onClose={() => {
             setModalVisible(false);
             setEditingExpense(null);
+            reset({
+              categoryName: '',
+              labor: '',
+              materials: '',
+            });
+            clearErrors();
           }}
           enablePanDownToClose={true}
           enableBackdrop={true}
+          snapPoints={[0.8]}
           backdropOpacity={0.5}
         >
-          <BottomSheetScrollView 
-            style={styles.bottomSheetContent} 
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={[
-              styles.bottomSheetScrollContent,
-              { paddingBottom: 200 + insets.bottom }
-            ]}
-            showsVerticalScrollIndicator={true}
-            bounces={false}
-          >
-            <Text style={styles.modalTitle}>
-              {editingExpense ? 'Редагувати категорію' : 'Нова категорія'}
-            </Text>
+          <View style={styles.bottomSheetWrapper}>
+            <BottomSheetScrollView
+              style={styles.bottomSheetContent}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.bottomSheetScrollContent}
+              showsVerticalScrollIndicator={true}
+              bounces={false}
+            >
+              <Text style={[styles.modalTitle, { color: theme.colors.text }]}>
+                {editingExpense ? 'Редагувати категорію' : 'Нова категорія'}
+              </Text>
 
-                <View style={styles.inputContainer}>
-                  <Text style={styles.label}>Назва категорії *</Text>
-                  <BottomSheetTextInput
-                    style={styles.input}
-                    placeholder="Наприклад: Монтаж"
-                    value={formData.categoryName}
-                    onChangeText={(text) =>
-                      setFormData({ ...formData, categoryName: text })
-                    }
-                  />
-                </View>
-
-                <View style={styles.inputContainer}>
-                  <Text style={styles.label}>🔹 Робота (₴)</Text>
-                  <BottomSheetTextInput
-                    style={styles.input}
-                    placeholder="0"
-                    value={formData.labor > 0 ? formData.labor.toString() : ''}
-                    onChangeText={(text) => {
-                      const num = parseFloat(text);
-                      setFormData({
-                        ...formData,
-                        labor: isNaN(num) ? 0 : num,
-                      });
-                    }}
-                    keyboardType="numeric"
-                  />
-                </View>
-
-                <View style={styles.inputContainer}>
-                  <Text style={styles.label}>🔹 Матеріали (₴)</Text>
-                  <BottomSheetTextInput
-                    style={styles.input}
-                    placeholder="0"
-                    value={formData.materials > 0 ? formData.materials.toString() : ''}
-                    onChangeText={(text) => {
-                      const num = parseFloat(text);
-                      setFormData({
-                        ...formData,
-                        materials: isNaN(num) ? 0 : num,
-                      });
-                    }}
-                    keyboardType="numeric"
-                  />
-                </View>
-
-                <View style={styles.modalTotalRow}>
-                  <Text style={styles.modalTotalLabel}>Разом:</Text>
-                  <Text style={styles.modalTotalAmount}>
-                    {formatCurrency(formData.labor + formData.materials)} грн
+              <View style={styles.inputContainer}>
+                <Text style={[styles.label, { color: theme.colors.text }]}>Назва категорії *</Text>
+                <Controller
+                  control={control}
+                  name="categoryName"
+                  render={({ field: { value, onChange, onBlur } }) => (
+                    <BottomSheetTextInput
+                      style={[
+                        styles.input,
+                        {
+                          backgroundColor: theme.colors.surface,
+                          borderColor: errors.categoryName ? theme.colors.danger : theme.colors.border,
+                          color: theme.colors.text,
+                        },
+                      ]}
+                      placeholder="Наприклад: Монтаж"
+                      placeholderTextColor={theme.colors.textSecondary}
+                      value={value ?? ''}
+                      onChangeText={onChange}
+                      onBlur={onBlur}
+                    />
+                  )}
+                />
+                {errors.categoryName && (
+                  <Text style={[styles.errorText, { color: theme.colors.danger }]}>
+                    {errors.categoryName.message}
                   </Text>
-                </View>
-
-                <View style={styles.inputContainer}>
-                  <Text style={styles.label}>Опис (опціонально)</Text>
-                  <BottomSheetTextInput
-                    style={[styles.input, styles.textArea]}
-                    placeholder="Додатковий опис категорії"
-                    value={formData.description}
-                    onChangeText={(text) =>
-                      setFormData({ ...formData, description: text })
-                    }
-                    multiline
-                    numberOfLines={3}
-                  />
-                </View>
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => {
-                  setModalVisible(false);
-                  setEditingExpense(null);
-                }}
-              >
-                <Text style={styles.cancelButtonText}>Скасувати</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.saveButton]}
-                onPress={handleSubmit}
-                disabled={submitting}
-              >
-                {submitting ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.saveButtonText}>Зберегти</Text>
                 )}
-              </TouchableOpacity>
+              </View>
+
+              <View style={styles.inputContainer}>
+                <Text style={[styles.label, { color: theme.colors.text }]}>🔹 Робота (₴)</Text>
+                <Controller
+                  control={control}
+                  name="labor"
+                  render={({ field: { value, onChange, onBlur } }) => (
+                    <BottomSheetTextInput
+                      style={[
+                        styles.input,
+                        {
+                          backgroundColor: theme.colors.surface,
+                          borderColor: errors.labor ? theme.colors.danger : theme.colors.border,
+                          color: theme.colors.text,
+                        },
+                      ]}
+                      placeholder="0"
+                      placeholderTextColor={theme.colors.textSecondary}
+                      value={value ?? ''}
+                      onChangeText={(text) => onChange(text.replace(/[^0-9.,]/g, ''))}
+                      onBlur={onBlur}
+                      keyboardType="numeric"
+                    />
+                  )}
+                />
+                {errors.labor && (
+                  <Text style={[styles.errorText, { color: theme.colors.danger }]}>
+                    {errors.labor.message}
+                  </Text>
+                )}
+              </View>
+
+              <View style={styles.inputContainer}>
+                <Text style={[styles.label, { color: theme.colors.text }]}>🔹 Матеріали (₴)</Text>
+                <Controller
+                  control={control}
+                  name="materials"
+                  render={({ field: { value, onChange, onBlur } }) => (
+                    <BottomSheetTextInput
+                      style={[
+                        styles.input,
+                        {
+                          backgroundColor: theme.colors.surface,
+                          borderColor: errors.materials ? theme.colors.danger : theme.colors.border,
+                          color: theme.colors.text,
+                        },
+                      ]}
+                      placeholder="0"
+                      placeholderTextColor={theme.colors.textSecondary}
+                      value={value ?? ''}
+                      onChangeText={(text) => onChange(text.replace(/[^0-9.,]/g, ''))}
+                      onBlur={onBlur}
+                      keyboardType="numeric"
+                    />
+                  )}
+                />
+                {errors.materials && (
+                  <Text style={[styles.errorText, { color: theme.colors.danger }]}>
+                    {errors.materials.message}
+                  </Text>
+                )}
+              </View>
+
+              <View style={[styles.modalTotalRow, { backgroundColor: theme.colors.primary + '15' }]}>
+                <Text style={[styles.modalTotalLabel, { color: theme.colors.text }]}>Разом:</Text>
+                <Text style={[styles.modalTotalAmount, { color: theme.colors.primaryText }]}>
+                  {formatCurrency(modalTotalAmount)}
+                </Text>
+              </View>
+            </BottomSheetScrollView>
+
+            <View
+              style={[
+                styles.bottomSheetActionsContainer,
+                {
+                  borderTopColor: theme.colors.border,
+                  backgroundColor: theme.colors.surface,
+                  paddingBottom: insets.bottom + 16,
+                },
+              ]}
+            >
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={[
+                    styles.modalButton,
+                    styles.cancelButton,
+                    {
+                      backgroundColor: theme.isDark 
+                        ? 'rgba(51, 65, 85, 0.5)' // Світліший темно-сірий для темної теми
+                        : '#f1f5f9', // Світло-сірий для світлої теми
+                      borderColor: theme.colors.border,
+                    },
+                  ]}
+                  onPress={() => {
+                    setModalVisible(false);
+                    setEditingExpense(null);
+                  reset({
+                    categoryName: '',
+                    labor: '',
+                    materials: '',
+                  });
+                  clearErrors();
+                  }}
+                >
+                  <Text style={[styles.cancelButtonText, { color: theme.colors.text }]}>Скасувати</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.saveButton, { backgroundColor: theme.colors.primary }]}
+                onPress={onSubmitExpense}
+                disabled={isSubmitting}
+                >
+                {isSubmitting ? (
+                    <ActivityIndicator color={theme.colors.primaryText} />
+                  ) : (
+                    <Text style={[styles.saveButtonText, { color: theme.colors.primaryText }]}>Зберегти</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
-            <View style={{ height: 100 }} />
-          </BottomSheetScrollView>
+          </View>
         </BottomSheet>
       </View>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 10,
-    color: '#666',
-  },
-  header: {
-    padding: 20,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 4,
-    color: '#333',
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#666',
-  },
-  projectSelector: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  projectButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: '#f0f0f0',
-    marginRight: 8,
-  },
-  projectButtonActive: {
-    backgroundColor: '#007AFF',
-  },
-  projectButtonText: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
-  },
-  projectButtonTextActive: {
-    color: '#fff',
-  },
-  listContent: {
-    padding: 16,
-    paddingBottom: 100, // Місце для загальної суми
-  },
-  addButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  addButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  expenseCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  expenseCategoryName: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  inputLabel: {
-    fontSize: 16,
-    color: '#333',
-    flex: 1,
-  },
-  inputValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#007AFF',
-  },
-  inlineInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 10,
-    fontSize: 16,
-    backgroundColor: '#f9f9f9',
-    marginHorizontal: 8,
-    textAlign: 'right',
-  },
-  currencyLabel: {
-    fontSize: 16,
-    color: '#666',
-    minWidth: 40,
-  },
-  categoryTotalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 8,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-  },
-  categoryTotalLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-  },
-  categoryTotalAmount: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#007AFF',
-  },
-  expenseActions: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 12,
-  },
-  editButton: {
-    flex: 1,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 8,
-    padding: 10,
-    alignItems: 'center',
-  },
-  editButtonText: {
-    color: '#007AFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  deleteButton: {
-    flex: 1,
-    backgroundColor: '#ffebee',
-    borderRadius: 8,
-    padding: 10,
-    alignItems: 'center',
-  },
-  deleteButtonText: {
-    color: '#ff3b30',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  inlineEditActions: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 12,
-  },
-  inlineSaveButton: {
-    flex: 1,
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-    padding: 10,
-    alignItems: 'center',
-  },
-  inlineSaveButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  inlineCancelButton: {
-    flex: 1,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 8,
-    padding: 10,
-    alignItems: 'center',
-  },
-  inlineCancelButtonText: {
-    color: '#666',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  projectTotalContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    backgroundColor: '#fff',
-    borderTopWidth: 2,
-    borderTopColor: '#007AFF',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  projectTotalLabel: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-  },
-  projectTotalAmount: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#007AFF',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  emptyText: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  createButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-    padding: 16,
-    paddingHorizontal: 32,
-  },
-  createButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  bottomSheetContent: {
-    flex: 1,
-  },
-  bottomSheetScrollContent: {
-    padding: 20,
-    paddingBottom: 120,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 20,
-    color: '#333',
-  },
-  inputContainer: {
-    marginBottom: 20,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 8,
-    color: '#333',
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    backgroundColor: '#f9f9f9',
-  },
-  textArea: {
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  modalTotalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: '#f0f7ff',
-    borderRadius: 8,
-    marginBottom: 20,
-  },
-  modalTotalLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-  },
-  modalTotalAmount: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#007AFF',
-  },
-  modalActions: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 20,
-    marginBottom: 20,
-  },
-  modalButton: {
-    flex: 1,
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-  },
-  cancelButton: {
-    backgroundColor: '#f0f0f0',
-  },
-  cancelButtonText: {
-    color: '#666',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  saveButton: {
-    backgroundColor: '#007AFF',
-  },
-  saveButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-});
+const createStyles = (colors: any) =>
+  StyleSheet.create({
+    safeArea: {
+      flex: 1,
+    },
+    container: {
+      flex: 1,
+    },
+    loadingContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    loadingText: {
+      marginTop: 10,
+    },
+    header: {
+      padding: 20,
+      borderBottomWidth: 1,
+      alignItems: 'center',
+    },
+    title: {
+      fontSize: 24,
+      fontWeight: 'bold',
+      marginBottom: 4,
+    },
+    subtitle: {
+      fontSize: 14,
+    },
+    projectSelector: {
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderBottomWidth: 1,
+    },
+    projectButton: {
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 20,
+      marginRight: 8,
+    },
+    projectButtonActive: {
+    },
+    projectButtonText: {
+      fontSize: 14,
+      fontWeight: '500',
+    },
+    projectButtonTextActive: {
+    },
+    listContent: {
+      padding: 16,
+      paddingBottom: 24,
+    },
+    expensesListWrapper: {
+      flex: 1,
+    },
+    bottomActionArea: {
+      paddingHorizontal: 20,
+      paddingTop: 16,
+      gap: 16,
+    },
+    addButton: {
+      borderRadius: 8,
+      padding: 16,
+      alignItems: 'center',
+    },
+    addButtonText: {
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    expenseCard: {
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 16,
+      borderWidth: 1,
+    },
+    expenseCategoryName: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      textAlign: 'center',
+      marginBottom: 16,
+    },
+    expenseCategoryInput: {
+      fontSize: 18,
+      fontWeight: '600',
+      textAlign: 'center',
+      borderWidth: 1,
+      borderRadius: 8,
+      padding: 12,
+      marginBottom: 16,
+    },
+    inputRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 12,
+    },
+    inputLabel: {
+      fontSize: 16,
+      flex: 1,
+    },
+    inputValue: {
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    inlineInput: {
+      flex: 1,
+      borderWidth: 1,
+      borderRadius: 8,
+      padding: 10,
+      fontSize: 16,
+      marginHorizontal: 8,
+      textAlign: 'right',
+    },
+    currencyLabel: {
+      fontSize: 16,
+      minWidth: 40,
+    },
+    categoryTotalRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginTop: 8,
+      paddingTop: 12,
+      borderTopWidth: 1,
+    },
+    categoryTotalLabel: {
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    categoryTotalAmount: {
+      fontSize: 18,
+      fontWeight: 'bold',
+    },
+    expenseActions: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 12,
+    },
+    editButton: {
+      flex: 1,
+      borderRadius: 8,
+      padding: 10,
+      alignItems: 'center',
+      borderWidth: 1,
+    },
+    editButtonText: {
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    deleteButton: {
+      flex: 1,
+      borderRadius: 8,
+      padding: 10,
+      alignItems: 'center',
+    },
+    deleteButtonText: {
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    inlineEditActions: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 12,
+    },
+    inlineSaveButton: {
+      flex: 1,
+      borderRadius: 8,
+      padding: 10,
+      alignItems: 'center',
+    },
+    inlineSaveButtonText: {
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    inlineCancelButton: {
+      flex: 1,
+      borderRadius: 8,
+      padding: 10,
+      alignItems: 'center',
+    },
+    inlineCancelButtonText: {
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    projectTotalContainer: {
+      flexDirection: 'row',
+      justifyContent: 'flex-start',
+      alignItems: 'center',
+      paddingTop: 12,
+      borderTopWidth: 2,
+      shadowColor: colors.shadow,
+      shadowOffset: { width: 0, height: -2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 4,
+      elevation: 5,
+    },
+    projectTotalLabel: {
+      fontSize: 18,
+      fontWeight: '600',
+      flex: 1,
+    },
+    projectTotalAmount: {
+      fontSize: 24,
+      fontWeight: 'bold',
+      textAlign: 'right',
+    },
+    emptyContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 20,
+    },
+    emptyText: {
+      fontSize: 16,
+      textAlign: 'center',
+      marginBottom: 24,
+    },
+    createButton: {
+      borderRadius: 8,
+      padding: 16,
+      paddingHorizontal: 32,
+    },
+    createButtonText: {
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    bottomSheetContent: {
+      flex: 1,
+    },
+    bottomSheetScrollContent: {
+      padding: 20,
+      paddingBottom: 24,
+    },
+    bottomSheetWrapper: {
+      flex: 1,
+    },
+    bottomSheetActionsContainer: {
+
+      paddingHorizontal: 20,
+      paddingTop: 16,
+    },
+    modalTitle: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      marginBottom: 20,
+    },
+    inputContainer: {
+      marginBottom: 20,
+    },
+    label: {
+      fontSize: 14,
+      fontWeight: '600',
+      marginBottom: 8,
+    },
+    input: {
+      borderWidth: 1,
+      borderRadius: 8,
+      padding: 12,
+      fontSize: 16,
+    },
+    modalTotalRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: 16,
+      borderRadius: 8,
+      marginBottom: 20,
+    },
+    modalTotalLabel: {
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    modalTotalAmount: {
+      fontSize: 20,
+      fontWeight: 'bold',
+    },
+    modalActions: {
+      flexDirection: 'row',
+      gap: 12,
+      marginTop: 20,
+      marginBottom: 20,
+    },
+    modalButton: {
+      flex: 1,
+      borderRadius: 8,
+      padding: 16,
+      alignItems: 'center',
+    },
+    errorText: {
+      fontSize: 12,
+      marginTop: 6,
+    },
+    cancelButton: {
+      borderWidth: 1,
+    },
+    cancelButtonText: {
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    saveButton: {
+    },
+    saveButtonText: {
+      fontSize: 16,
+      fontWeight: '600',
+    },
+  });

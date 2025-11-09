@@ -7,7 +7,9 @@ import {
   BottomSheetBackdrop,
   BottomSheetScrollView,
   BottomSheetTextInput,
+  BottomSheetHandle,
 } from '@gorhom/bottom-sheet';
+import { useTheme } from '../contexts/ThemeContext';
 
 // Експортуємо BottomSheetScrollView та BottomSheetTextInput для використання в екранах
 export { BottomSheetScrollView, BottomSheetTextInput };
@@ -30,7 +32,7 @@ export interface BottomSheetProps {
 }
 
 const DEFAULT_BACKDROP_OPACITY = 0.5;
-const DEFAULT_MAX_HEIGHT = 0.8;
+const DEFAULT_MAX_HEIGHT = 0.9;
 
 export default function BottomSheet({
   visible,
@@ -47,6 +49,7 @@ export default function BottomSheet({
   const bottomSheetModalRef = useRef<BottomSheetModal>(null);
   const { height: screenHeight } = Dimensions.get('window');
   const insets = useSafeAreaInsets();
+  const { theme } = useTheme();
 
   // Обчислюємо snapPoints
   const defaultSnapPoints = useMemo(() => {
@@ -102,18 +105,7 @@ export default function BottomSheet({
     };
   }, [visible, handleKeyboardHide]);
 
-  // Обробка змін стану bottom sheet
-  const handleSheetChanges = useCallback(
-    (index: number) => {
-      if (index === -1) {
-        // Bottom sheet закрито
-        onClose();
-      }
-    },
-    [onClose]
-  );
-
-  // Рендер бекдропу
+  // Рендер бекдропу з темою
   const renderBackdrop = useCallback(
     (props: any) => {
       if (!enableBackdrop) {
@@ -125,19 +117,50 @@ export default function BottomSheet({
           disappearsOnIndex={-1}
           appearsOnIndex={0}
           opacity={backdropOpacity}
+          style={[
+            props.style,
+            {
+              backgroundColor: theme.isDark 
+                ? 'rgba(0, 0, 0, 0.7)' 
+                : 'rgba(0, 0, 0, 0.5)',
+            },
+          ]}
         />
       );
     },
-    [enableBackdrop, backdropOpacity]
+    [enableBackdrop, backdropOpacity, theme.isDark]
+  );
+
+  // Рендер handle (смужка зверху) з темою
+  const renderHandle = useCallback(
+    (props: any) => (
+      <BottomSheetHandle
+        {...props}
+        style={[
+          props.style,
+          {
+            backgroundColor: theme.colors.surface,
+          },
+        ]}
+        indicatorStyle={{
+          backgroundColor: theme.colors.border,
+        }}
+      />
+    ),
+    [theme.colors]
   );
 
   return (
     <BottomSheetModal
       ref={bottomSheetModalRef}
       snapPoints={defaultSnapPoints}
-      onChange={handleSheetChanges}
+      onDismiss={onClose}
       enablePanDownToClose={enablePanDownToClose}
       backdropComponent={renderBackdrop}
+      handleComponent={renderHandle}
+      backgroundStyle={{
+        backgroundColor: theme.colors.surface,
+      }}
       keyboardBehavior="interactive"
       keyboardBlurBehavior="restore"
       android_keyboardInputMode="adjustResize"
@@ -151,7 +174,7 @@ export default function BottomSheet({
       topInset={insets.top}
       maxDynamicContentSize={maxDynamicContentSize}
     >
-      <BottomSheetView style={styles.contentContainer}>
+      <BottomSheetView style={[styles.contentContainer, { backgroundColor: theme.colors.surface }]}>
         {children}
       </BottomSheetView>
     </BottomSheetModal>
