@@ -2,7 +2,7 @@ import 'react-native-screens';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { View, ActivityIndicator, StyleSheet, Platform, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -19,6 +19,7 @@ const Tab = createBottomTabNavigator();
 function MainNavigator() {
   const { user, loading: authLoading } = useAuth();
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
 
   if (authLoading) {
     return (
@@ -41,25 +42,29 @@ function MainNavigator() {
   }
 
   return (
+    <View
+      style={{
+        flex: 1,
+        paddingTop: insets.top,
+        backgroundColor: theme.colors.background,
+      }}
+    >
     <Tab.Navigator
+     
       screenOptions={{
-        headerShown: true,
-        headerStatusBarHeight: 0,
-        headerStyle: {
-          backgroundColor: theme.colors.surface,
-          elevation: 0,
-          shadowOpacity: 0,
-          borderBottomWidth: 0,
-        },
-        headerTintColor: theme.colors.text,
-        headerTitleStyle: {
-          color: theme.colors.text,
-        },
+        headerShown: false,
         tabBarStyle: {
-          height: Platform.OS === 'ios' ? 70 : 64,
-          paddingBottom: Platform.OS === 'ios' ? 16 : 10,
+          height:
+            Platform.OS === 'ios'
+              ? 70 + insets.bottom
+              : 64 + (insets.bottom > 0 ? insets.bottom : 0),
+          paddingBottom:
+            insets.bottom > 0
+              ? insets.bottom
+              : Platform.OS === 'ios'
+              ? 16
+              : 12,
           paddingTop: 12,
-          marginBottom: Platform.OS === 'ios' ? 24 : 16,
           backgroundColor: theme.colors.surface,
           borderTopColor: theme.colors.border,
           borderTopWidth: StyleSheet.hairlineWidth,
@@ -78,7 +83,7 @@ function MainNavigator() {
         component={ProjectsScreen}
         options={{
           title: 'Проєкти',
-          tabBarLabel: 'Проекти',
+          tabBarLabel: 'Проєкти',
           tabBarIcon: ({ color, size }) => (
             <Ionicons
               name="briefcase-outline"
@@ -119,6 +124,7 @@ function MainNavigator() {
         }}
       />
     </Tab.Navigator>
+    </View>
   );
 }
 

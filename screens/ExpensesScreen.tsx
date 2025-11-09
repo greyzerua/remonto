@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   StyleSheet,
   Text,
@@ -9,6 +9,8 @@ import {
   ActivityIndicator,
   TextInput,
   ScrollView,
+  Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -84,6 +86,15 @@ export default function ExpensesScreen() {
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  const bottomSheetSnapPoints = useMemo(
+    () => [Platform.OS === 'ios' ? 0.7 : 0.92],
+    []
+  );
+  const { height: windowHeight } = useWindowDimensions();
+  const bottomSheetContentMaxHeight = useMemo(
+    () => windowHeight * (Platform.OS === 'ios' ? 0.62 : 0.74),
+    [windowHeight]
+  );
   const {
     control,
     handleSubmit: handleExpenseSubmit,
@@ -550,14 +561,17 @@ export default function ExpensesScreen() {
           }}
           enablePanDownToClose={true}
           enableBackdrop={true}
-          snapPoints={[0.8]}
+          snapPoints={bottomSheetSnapPoints}
           backdropOpacity={0.5}
         >
           <View style={styles.bottomSheetWrapper}>
             <BottomSheetScrollView
-              style={styles.bottomSheetContent}
               keyboardShouldPersistTaps="handled"
-              contentContainerStyle={styles.bottomSheetScrollContent}
+              style={{ maxHeight: bottomSheetContentMaxHeight }}
+              contentContainerStyle={[
+                styles.bottomSheetScrollContent,
+                { paddingBottom: insets.bottom + 24 },
+              ]}
               showsVerticalScrollIndicator={true}
               bounces={false}
             >
@@ -945,12 +959,9 @@ const createStyles = (colors: any) =>
       fontSize: 16,
       fontWeight: '600',
     },
-    bottomSheetContent: {
-      flex: 1,
-    },
     bottomSheetScrollContent: {
-      padding: 20,
-      paddingBottom: 24,
+      paddingHorizontal: 20,
+  
     },
     bottomSheetWrapper: {
       flex: 1,
@@ -958,15 +969,16 @@ const createStyles = (colors: any) =>
     bottomSheetActionsContainer: {
 
       paddingHorizontal: 20,
-      paddingTop: 16,
+ 
+  
     },
     modalTitle: {
       fontSize: 20,
       fontWeight: 'bold',
-      marginBottom: 20,
+      marginBottom: 10,
     },
     inputContainer: {
-      marginBottom: 20,
+      marginBottom: 10,
     },
     label: {
       fontSize: 14,
@@ -985,7 +997,7 @@ const createStyles = (colors: any) =>
       alignItems: 'center',
       padding: 16,
       borderRadius: 8,
-      marginBottom: 20,
+      
     },
     modalTotalLabel: {
       fontSize: 16,
@@ -998,8 +1010,7 @@ const createStyles = (colors: any) =>
     modalActions: {
       flexDirection: 'row',
       gap: 12,
-      marginTop: 20,
-      marginBottom: 20,
+
     },
     modalButton: {
       flex: 1,

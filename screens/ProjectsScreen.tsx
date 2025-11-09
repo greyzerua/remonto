@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   StyleSheet,
   Text,
@@ -8,6 +8,8 @@ import {
   Alert,
   ActivityIndicator,
   Image,
+  useWindowDimensions,
+  Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -43,6 +45,10 @@ export default function ProjectsScreen() {
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const bottomSheetSnapPoints = useMemo(
+    () => [Platform.OS === 'ios' ? 0.7 : 0.9],
+    []
+  );
   const {
     control,
     handleSubmit,
@@ -60,6 +66,11 @@ export default function ProjectsScreen() {
     },
   });
   const selectedStatus = watch('status');
+  const { height: windowHeight } = useWindowDimensions();
+  const bottomSheetContentMaxHeight = useMemo(
+    () => windowHeight * (Platform.OS === 'ios' ? 0.62 : 0.74),
+    [windowHeight]
+  );
 
   useEffect(() => {
     if (!user) return;
@@ -310,13 +321,16 @@ export default function ProjectsScreen() {
           enablePanDownToClose={true}
           enableBackdrop={true}
           backdropOpacity={0.5}
-          snapPoints={[0.6]}
+          snapPoints={bottomSheetSnapPoints}
         >
           <View style={styles.bottomSheetWrapper}>
-            <BottomSheetScrollView 
-              style={styles.bottomSheetContent} 
+            <BottomSheetScrollView
               keyboardShouldPersistTaps="handled"
-              contentContainerStyle={styles.bottomSheetScrollContent}
+              style={{ maxHeight: bottomSheetContentMaxHeight }}
+              contentContainerStyle={[
+                styles.bottomSheetScrollContent,
+                { paddingBottom: insets.bottom + 24 },
+              ]}
               showsVerticalScrollIndicator={true}
               bounces={false}
             >
@@ -324,74 +338,72 @@ export default function ProjectsScreen() {
                 {editingProject ? 'Редагувати проект' : 'Новий проект'}
               </Text>
 
-                  <View style={styles.inputContainer}>
-                    <Text style={[styles.label, { color: theme.colors.text }]}>Назва проєкту *</Text>
-                    <Controller
-                      control={control}
-                      name="name"
-                      render={({ field: { value, onChange, onBlur } }) => (
-                        <BottomSheetTextInput
-                          style={[
-                            styles.input,
-                            {
-                              backgroundColor: theme.colors.surface,
-                              borderColor: errors.name ? theme.colors.danger : theme.colors.border,
-                              color: theme.colors.text,
-                            },
-                          ]}
-                          placeholder="Наприклад: Ремонт кухні"
-                          placeholderTextColor={theme.colors.textSecondary}
-                          value={value ?? ''}
-                          onChangeText={onChange}
-                          onBlur={onBlur}
-                        />
-                      )}
+              <View style={styles.inputContainer}>
+                <Text style={[styles.label, { color: theme.colors.text }]}>Назва проєкту *</Text>
+                <Controller
+                  control={control}
+                  name="name"
+                  render={({ field: { value, onChange, onBlur } }) => (
+                    <BottomSheetTextInput
+                      style={[
+                        styles.input,
+                        {
+                          backgroundColor: theme.colors.surface,
+                          borderColor: errors.name ? theme.colors.danger : theme.colors.border,
+                          color: theme.colors.text,
+                        },
+                      ]}
+                      placeholder="Наприклад: Ремонт кухні"
+                      placeholderTextColor={theme.colors.textSecondary}
+                      value={value ?? ''}
+                      onChangeText={onChange}
+                      onBlur={onBlur}
                     />
-                    {errors.name && (
-                      <Text style={[styles.errorText, { color: theme.colors.danger }]}>
-                        {errors.name.message}
-                      </Text>
-                    )}
-                  </View>
+                  )}
+                />
+                {errors.name && (
+                  <Text style={[styles.errorText, { color: theme.colors.danger }]}>
+                    {errors.name.message}
+                  </Text>
+                )}
+              </View>
 
-                  <View style={styles.inputContainer}>
-                    <Text style={[styles.label, { color: theme.colors.text }]}>Статус</Text>
-                    <View style={styles.statusButtons}>
-                      {(['active', 'planned', 'paused', 'completed'] as ProjectStatus[]).map(
-                        (status) => (
-                          <TouchableOpacity
-                            key={status}
-                            style={[
-                              styles.statusButton,
-                              {
-                                backgroundColor: theme.colors.surface,
-                                borderColor: selectedStatus === status ? theme.colors.primary : theme.colors.border,
-                              },
-                              selectedStatus === status && [
-                                styles.statusButtonActive,
-                                { backgroundColor: theme.colors.primary },
-                              ],
-                            ]}
-                            onPress={() => setValue('status', status, { shouldValidate: true })}
-                          >
-                            <Text
-                              style={[
-                                styles.statusButtonText,
-                                { color: selectedStatus === status ? theme.colors.primaryText : theme.colors.textSecondary },
-                              ]}
-                            >
-                              {getStatusName(status)}
-                            </Text>
-                          </TouchableOpacity>
-                        )
-                      )}
-                    </View>
-                    {errors.status && (
-                      <Text style={[styles.errorText, { color: theme.colors.danger }]}>
-                        {errors.status.message}
+              <View style={styles.inputContainer}>
+                <Text style={[styles.label, { color: theme.colors.text }]}>Статус</Text>
+                <View style={styles.statusButtons}>
+                  {(['active', 'planned', 'paused', 'completed'] as ProjectStatus[]).map((status) => (
+                    <TouchableOpacity
+                      key={status}
+                      style={[
+                        styles.statusButton,
+                        {
+                          backgroundColor: theme.colors.surface,
+                          borderColor: selectedStatus === status ? theme.colors.primary : theme.colors.border,
+                        },
+                        selectedStatus === status && [
+                          styles.statusButtonActive,
+                          { backgroundColor: theme.colors.primary },
+                        ],
+                      ]}
+                      onPress={() => setValue('status', status, { shouldValidate: true })}
+                    >
+                      <Text
+                        style={[
+                          styles.statusButtonText,
+                          { color: selectedStatus === status ? theme.colors.primaryText : theme.colors.textSecondary },
+                        ]}
+                      >
+                        {getStatusName(status)}
                       </Text>
-                    )}
-                  </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                {errors.status && (
+                  <Text style={[styles.errorText, { color: theme.colors.danger }]}>
+                    {errors.status.message}
+                  </Text>
+                )}
+              </View>
             </BottomSheetScrollView>
 
             <View
@@ -595,21 +607,18 @@ const createStyles = (colors: any) =>
       fontSize: 16,
       fontWeight: '600',
     },
-    bottomSheetContent: {
-      flex: 1,
-    
-    },
     bottomSheetScrollContent: {
-      padding: 20,
-
+      paddingHorizontal: 20,
+      paddingTop: 20,
+      paddingBottom: 24,
     },
     bottomSheetWrapper: {
       flex: 1,
-     
     },
     bottomSheetActionsContainer: {
       paddingHorizontal: 20,
       paddingTop: 16,
+      marginTop: 12,
     },
     modalTitle: {
       fontSize: 20,
