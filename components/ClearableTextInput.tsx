@@ -30,7 +30,7 @@ const ClearableTextInput = forwardRef<TextInput, ClearableTextInputProps>(
       InputComponent = TextInput,
       containerStyle,
       clearIconColor,
-      clearIconSize = 20,
+      clearIconSize = 24,
       showClearIcon = true,
       onClear,
       style,
@@ -74,7 +74,7 @@ const ClearableTextInput = forwardRef<TextInput, ClearableTextInputProps>(
             accessibilityLabel="Очистити поле"
           >
             <Ionicons
-              name="close-circle"
+              name="close"
               size={clearIconSize}
               color={resolvedIconColor}
             />
