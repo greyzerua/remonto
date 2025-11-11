@@ -172,14 +172,6 @@ export default function SettingsScreen() {
                   {userData?.displayName || authUser?.displayName || 'Не вказано'}
                 </Text>
               </View>
-              {userData?.createdAt && (
-                <View style={[styles.infoCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-                  <Text style={[styles.infoLabel, { color: theme.colors.textSecondary }]}>Дата реєстрації</Text>
-                  <Text style={[styles.infoValue, { color: theme.colors.text }]}>
-                    {formatDateShort(userData.createdAt)}
-                  </Text>
-                </View>
-              )}
             </View>
           </View>
 
@@ -375,15 +367,14 @@ const createStyles = (colors: any) =>
       borderWidth: 1,
       borderRadius: 12,
       padding: 12,
-      flexDirection: 'row',
-      alignItems: 'center',
+      alignItems: 'stretch',
       marginBottom: 20,
     },
     shareInput: {
-      flex: 1,
       fontSize: 16,
       paddingVertical: 8,
-      marginRight: 12,
+      marginBottom: 12,
+      alignSelf: 'stretch',
     },
     shareButton: {
       borderRadius: 8,
@@ -391,6 +382,7 @@ const createStyles = (colors: any) =>
       paddingHorizontal: 16,
       alignItems: 'center',
       justifyContent: 'center',
+      alignSelf: 'stretch',
     },
     shareButtonText: {
       fontSize: 14,

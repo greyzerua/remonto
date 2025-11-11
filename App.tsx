@@ -53,11 +53,9 @@ function MainNavigator() {
      
       screenOptions={{
         headerShown: false,
+        tabBarLabelPosition: 'below-icon',
         tabBarStyle: {
-          height:
-            Platform.OS === 'ios'
-              ? 70 + insets.bottom
-              : 64 + (insets.bottom > 0 ? insets.bottom : 0),
+          height: 70 + insets.bottom,
           paddingBottom:
             insets.bottom > 0
               ? insets.bottom
@@ -68,6 +66,7 @@ function MainNavigator() {
           backgroundColor: theme.colors.surface,
           borderTopColor: theme.colors.border,
           borderTopWidth: StyleSheet.hairlineWidth,
+          
         },
         tabBarActiveTintColor: theme.isDark ? '#F7FAFF' : '#1F2937',
         tabBarInactiveTintColor: theme.isDark ? 'rgba(226, 232, 240, 0.6)' : 'rgba(30, 27, 75, 0.55)',
