@@ -2,9 +2,11 @@
 export interface User {
   id: string; // Firebase UID
   email: string;
+  emailLowercase?: string;
   displayName?: string;
   photoURL?: string;
   createdAt: string;
+  sharedUsers?: string[];
 }
 
 // Типи для проектів ремонту
@@ -20,6 +22,7 @@ export interface Project {
   createdBy: string; // ID користувача, який створив
   createdAt: string; // ISO date string
   updatedAt: string; // ISO date string
+  members?: string[];
 }
 
 // Типи для витрат (категорій витрат)

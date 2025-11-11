@@ -20,6 +20,9 @@ export async function registerUser(
   displayName?: string
 ): Promise<FirebaseUser> {
   try {
+    const trimmedEmail = email.trim();
+    const normalizedEmail = trimmedEmail.toLowerCase();
+
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     const user = userCredential.user;
 
@@ -32,8 +35,10 @@ export async function registerUser(
     // Виключаємо поля з undefined значеннями (Firestore не підтримує undefined)
     const userData: Partial<User> = {
       id: user.uid,
-      email: user.email || email,
+      email: (user.email || trimmedEmail).toLowerCase(),
+      emailLowercase: normalizedEmail,
       createdAt: new Date().toISOString(),
+      sharedUsers: [],
     };
 
     // Додаємо опціональні поля тільки якщо вони існують

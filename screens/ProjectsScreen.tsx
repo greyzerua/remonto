@@ -38,7 +38,7 @@ const projectSchema = z.object({
 type ProjectFormValues = z.infer<typeof projectSchema>;
 
 export default function ProjectsScreen() {
-  const { user } = useAuth();
+  const { user, userData } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
@@ -151,7 +151,7 @@ export default function ProjectsScreen() {
       if (editingProject) {
         await updateProject(editingProject.id, payload);
       } else {
-        await createProject(payload, user.uid);
+        await createProject(payload, user.uid, userData?.sharedUsers ?? []);
       }
       setModalVisible(false);
       setEditingProject(null);
