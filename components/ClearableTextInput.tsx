@@ -30,7 +30,7 @@ const ClearableTextInput = forwardRef<TextInput, ClearableTextInputProps>(
       InputComponent = TextInput,
       containerStyle,
       clearIconColor,
-      clearIconSize = 24,
+      clearIconSize = 19,
       showClearIcon = true,
       onClear,
       style,
