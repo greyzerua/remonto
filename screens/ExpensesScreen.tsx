@@ -168,11 +168,33 @@ export default function ExpensesScreen() {
   useEffect(() => {
     if (!selectedProject || !user) return;
 
-    const unsubscribe = subscribeToExpenses(selectedProject.id, user.uid, (updatedExpenses) => {
-      setExpenses(updatedExpenses);
-    });
+    let isMounted = true;
+    let unsubscribe: (() => void) | null = null;
 
-    return () => unsubscribe();
+    const subscribe = async () => {
+      try {
+        unsubscribe = await subscribeToExpenses(selectedProject.id, user.uid, (updatedExpenses) => {
+          if (isMounted) {
+            setExpenses(updatedExpenses);
+          }
+        });
+      } catch (error) {
+        console.error('Не вдалося підписатися на витрати проєкту:', error);
+        if (isMounted) {
+          Alert.alert('Помилка', 'У вас немає доступу до витрат цього проєкту');
+          setExpenses([]);
+        }
+      }
+    };
+
+    subscribe();
+
+    return () => {
+      isMounted = false;
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
   }, [selectedProject, user]);
 
   const handleCreateExpense = () => {
