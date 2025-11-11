@@ -274,7 +274,7 @@ export default function ProjectsScreen() {
 
         {projects.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>📋 Немає проектів</Text>
+            <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>Немає проектів</Text>
             <Text style={[styles.emptyText, { color: theme.colors.textSecondary }]}>
               Створіть перший проект ремонту, щоб почати облік витрат
             </Text>
