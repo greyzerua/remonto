@@ -28,6 +28,7 @@ import {
 import { Project, ProjectFormData, ProjectStatus } from '../types';
 import { formatDateShort, getStatusName } from '../utils/helpers';
 import BottomSheet, { BottomSheetScrollView, BottomSheetTextInput } from '../components/BottomSheet';
+import ClearableTextInput from '../components/ClearableTextInput';
 
 const projectSchema = z.object({
   name: z.string().trim().min(1, 'Введіть назву проєкту'),
@@ -344,7 +345,8 @@ export default function ProjectsScreen() {
                   control={control}
                   name="name"
                   render={({ field: { value, onChange, onBlur } }) => (
-                    <BottomSheetTextInput
+                    <ClearableTextInput
+                      InputComponent={BottomSheetTextInput}
                       style={[
                         styles.input,
                         {
