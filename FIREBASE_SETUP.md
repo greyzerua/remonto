@@ -28,27 +28,31 @@ const firebaseConfig = {
 
 ## Крок 3: Налаштування конфігурації Firebase
 
-✅ **Конфігурація вже налаштована!** Значення додані в `config/firebase.ts`.
+⚠️ **Обов'язково використовуйте змінні оточення.** Файл `config/firebase.ts` тепер вимагає їх наявності й не містить жодних дефолтних значень.
 
-### Опціонально: Використання змінних оточення (рекомендовано для безпеки)
-
-Якщо хочете використовувати `.env` файл для зберігання конфігурації (особливо для безпеки API ключа):
-
-1. Створіть файл `.env` в корені проекту
-2. Додайте значення з вашої конфігурації Firebase:
+1. Створіть файл `.env` у корені проєкту (файл вже додано до `.gitignore`).
+2. Додайте у `.env` значення з консолі Firebase:
 
 ```env
-EXPO_PUBLIC_FIREBASE_API_KEY=REMOVED
-EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=remonto-d532a.firebaseapp.com
-EXPO_PUBLIC_FIREBASE_PROJECT_ID=remonto-d532a
-EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=remonto-d532a.firebasestorage.app
-EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=450755066363
-EXPO_PUBLIC_FIREBASE_APP_ID=1:450755066363:web:500918e4ae4905bffef35e
+EXPO_PUBLIC_FIREBASE_API_KEY=ВАШ_API_KEY
+EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=ВАШ_AUTH_DOMAIN
+EXPO_PUBLIC_FIREBASE_PROJECT_ID=ВАШ_PROJECT_ID
+EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=ВАШ_STORAGE_BUCKET
+EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=ВАШ_MESSAGING_SENDER_ID
+EXPO_PUBLIC_FIREBASE_APP_ID=ВАШ_APP_ID
 ```
 
-3. Переконайтеся, що `.env` файл додано до `.gitignore` (щоб не комітити конфіденційні дані)
+3. Перезапустіть Expo, щоб змінні підтягнулися у застосунок.
 
-**Примітка:** Якщо `.env` файл не створено, додаток використає значення з `config/firebase.ts`.
+### Ротація ключів Firebase
+
+Якщо ключ потрапив у публічний доступ:
+
+1. У Firebase Console відкрийте `Project settings → General`.
+2. У блоці `Your apps` натисніть `Manage API keys` та створіть новий ключ.
+3. Обмежте новий ключ лише необхідними доменами / bundle-id.
+4. Оновіть `.env` у проєкті новими значеннями.
+5. Видаліть або заархівуйте старий ключ, щоб він не працював.
 
 ## Крок 4: Налаштування Authentication
 
