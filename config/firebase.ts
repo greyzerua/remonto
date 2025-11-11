@@ -3,14 +3,26 @@ import { getAuth, Auth, initializeAuth, getReactNativePersistence } from 'fireba
 import { getFirestore, Firestore } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+const getRequiredEnv = (key: string): string => {
+  const value = process.env[key];
+
+  if (!value) {
+    throw new Error(
+      `Missing environment variable "${key}". Provide it via app.config.js / app.json or an .env file.`,
+    );
+  }
+
+  return value;
+};
+
 // Firebase конфігурація
 const firebaseConfig = {
-  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || 'REMOVED',
-  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || 'remonto-d532a.firebaseapp.com',
-  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'remonto-d532a',
-  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || 'remonto-d532a.firebasestorage.app',
-  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || '450755066363',
-  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || '1:450755066363:web:500918e4ae4905bffef35e',
+  apiKey: getRequiredEnv('EXPO_PUBLIC_FIREBASE_API_KEY'),
+  authDomain: getRequiredEnv('EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN'),
+  projectId: getRequiredEnv('EXPO_PUBLIC_FIREBASE_PROJECT_ID'),
+  storageBucket: getRequiredEnv('EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET'),
+  messagingSenderId: getRequiredEnv('EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID'),
+  appId: getRequiredEnv('EXPO_PUBLIC_FIREBASE_APP_ID'),
 };
 
 // Ініціалізація Firebase
