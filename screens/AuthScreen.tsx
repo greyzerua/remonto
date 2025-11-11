@@ -3,7 +3,6 @@ import {
   StyleSheet,
   Text,
   View,
-  TextInput,
   TouchableOpacity,
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -20,6 +19,7 @@ import { registerUser, loginUser, checkIfEmailExists } from '../services/auth';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { getEmail, saveEmail } from '../utils/secureStorage';
+import ClearableTextInput from '../components/ClearableTextInput';
 
 const authSchema = z.object({
   email: z
@@ -199,7 +199,8 @@ export default function AuthScreen() {
                     },
                   ]}
                 >
-                  <TextInput
+                  <ClearableTextInput
+                    containerStyle={{ flex: 1 }}
                     style={[styles.input, { color: theme.colors.text }]}
                     placeholder="Як до вас звертатися?"
                     placeholderTextColor={theme.colors.textSecondary}
@@ -234,7 +235,8 @@ export default function AuthScreen() {
                   control={control}
                   name="email"
                   render={({ field: { onChange, onBlur, value } }) => (
-                    <TextInput
+                    <ClearableTextInput
+                      containerStyle={{ flex: 1 }}
                       style={[styles.input, { color: theme.colors.text }]}
                       placeholder="you@remonto.com"
                       placeholderTextColor={theme.colors.textSecondary}
@@ -270,7 +272,8 @@ export default function AuthScreen() {
                 control={control}
                 name="password"
                 render={({ field: { onChange, onBlur, value } }) => (
-                  <TextInput
+                  <ClearableTextInput
+                    containerStyle={{ flex: 1 }}
                     style={[styles.input, { color: theme.colors.text }]}
                     placeholder={isLogin ? 'Уведіть пароль' : 'Створіть надійний пароль'}
                     placeholderTextColor={theme.colors.textSecondary}

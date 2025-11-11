@@ -7,7 +7,6 @@ import {
   FlatList,
   Alert,
   ActivityIndicator,
-  TextInput,
   ScrollView,
   Platform,
   useWindowDimensions,
@@ -29,6 +28,7 @@ import {
 import { Project, Expense, ExpenseFormData } from '../types';
 import { formatCurrency } from '../utils/helpers';
 import BottomSheet, { BottomSheetScrollView, BottomSheetTextInput } from '../components/BottomSheet';
+import ClearableTextInput from '../components/ClearableTextInput';
 
 const normalizeAmount = (value: string) => {
   if (value === undefined || value === null) {
@@ -308,6 +308,7 @@ export default function ExpensesScreen() {
   const totalAmount = expenses.reduce((sum, expense) => sum + expense.labor + expense.materials, 0);
 
   const styles = createStyles(theme.colors);
+  const emphasisColor = theme.isDark ? theme.colors.primaryText : theme.colors.primary;
 
   const renderExpenseItem = ({ item }: { item: Expense }) => {
     const isEditing = editingCategoryId === item.id;
@@ -315,9 +316,9 @@ export default function ExpensesScreen() {
 
     return (
       <View style={[styles.expenseCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-        {/* Назва категорії */}
+        
         {isEditing ? (
-          <TextInput
+          <ClearableTextInput
             style={[
               styles.expenseCategoryInput,
               {
@@ -340,12 +341,16 @@ export default function ExpensesScreen() {
           <>
             <View style={styles.inputRow}>
               <Text style={[styles.inputLabel, { color: theme.colors.text }]}>🔹 Робота</Text>
-              <TextInput
-                style={[styles.inlineInput, { 
-                  backgroundColor: theme.colors.surface, 
-                  borderColor: theme.colors.border,
-                  color: theme.colors.text 
-                }]}
+              <ClearableTextInput
+                containerStyle={{ flex: 1 }}
+                style={[
+                  styles.inlineInput,
+                  {
+                    backgroundColor: theme.colors.surface,
+                    borderColor: theme.colors.border,
+                    color: theme.colors.text,
+                  },
+                ]}
                 placeholder="0"
                 placeholderTextColor={theme.colors.textSecondary}
                 value={editingLabor}
@@ -358,12 +363,16 @@ export default function ExpensesScreen() {
 
             <View style={styles.inputRow}>
               <Text style={[styles.inputLabel, { color: theme.colors.text }]}>🔹 Матеріали</Text>
-              <TextInput
-                style={[styles.inlineInput, { 
-                  backgroundColor: theme.colors.surface, 
-                  borderColor: theme.colors.border,
-                  color: theme.colors.text 
-                }]}
+              <ClearableTextInput
+                containerStyle={{ flex: 1 }}
+                style={[
+                  styles.inlineInput,
+                  {
+                    backgroundColor: theme.colors.surface,
+                    borderColor: theme.colors.border,
+                    color: theme.colors.text,
+                  },
+                ]}
                 placeholder="0"
                 placeholderTextColor={theme.colors.textSecondary}
                 value={editingMaterials}
@@ -375,7 +384,7 @@ export default function ExpensesScreen() {
 
             <View style={[styles.categoryTotalRow, { borderTopColor: theme.colors.border }]}>
               <Text style={[styles.categoryTotalLabel, { color: theme.colors.text }]}>Разом:</Text>
-              <Text style={[styles.categoryTotalAmount, { color: theme.colors.primaryText }]}>
+              <Text style={[styles.categoryTotalAmount, { color: emphasisColor }]}>
                 {formatCurrency((parseFloat(editingLabor) || 0) + (parseFloat(editingMaterials) || 0))}
               </Text>
             </View>
@@ -403,17 +412,17 @@ export default function ExpensesScreen() {
           <>
             <View style={styles.inputRow}>
               <Text style={[styles.inputLabel, { color: theme.colors.text }]}>🔹 Робота</Text>
-              <Text style={[styles.inputValue, { color: theme.colors.primaryText }]}>{formatCurrency(item.labor)}</Text>
+              <Text style={[styles.inputValue, { color: emphasisColor }]}>{formatCurrency(item.labor)}</Text>
             </View>
 
             <View style={styles.inputRow}>
               <Text style={[styles.inputLabel, { color: theme.colors.text }]}>🔹 Матеріали</Text>
-              <Text style={[styles.inputValue, { color: theme.colors.primaryText }]}>{formatCurrency(item.materials)}</Text>
+              <Text style={[styles.inputValue, { color: emphasisColor }]}>{formatCurrency(item.materials)}</Text>
             </View>
 
             <View style={[styles.categoryTotalRow, { borderTopColor: theme.colors.border }]}>
               <Text style={[styles.categoryTotalLabel, { color: theme.colors.text }]}>Разом:</Text>
-              <Text style={[styles.categoryTotalAmount, { color: theme.colors.primaryText }]}>{formatCurrency(categoryTotal)}</Text>
+              <Text style={[styles.categoryTotalAmount, { color: emphasisColor }]}>{formatCurrency(categoryTotal)}</Text>
             </View>
 
             <View style={styles.expenseActions}>
@@ -536,7 +545,7 @@ export default function ExpensesScreen() {
 
                       <View style={[styles.projectTotalContainer, { borderTopColor: theme.colors.primary }]}>
                         <Text style={[styles.projectTotalLabel, { color: theme.colors.text }]}>Разом по проєкту:</Text>
-                        <Text style={[styles.projectTotalAmount, { color: theme.colors.primaryText }]}>{formatCurrency(totalAmount)}</Text>
+                        <Text style={[styles.projectTotalAmount, { color: emphasisColor }]}>{formatCurrency(totalAmount)}</Text>
                       </View>
                     </View>
                   </>
@@ -585,7 +594,8 @@ export default function ExpensesScreen() {
                   control={control}
                   name="categoryName"
                   render={({ field: { value, onChange, onBlur } }) => (
-                    <BottomSheetTextInput
+                    <ClearableTextInput
+                      InputComponent={BottomSheetTextInput}
                       style={[
                         styles.input,
                         {
@@ -615,7 +625,8 @@ export default function ExpensesScreen() {
                   control={control}
                   name="labor"
                   render={({ field: { value, onChange, onBlur } }) => (
-                    <BottomSheetTextInput
+                    <ClearableTextInput
+                      InputComponent={BottomSheetTextInput}
                       style={[
                         styles.input,
                         {
@@ -646,7 +657,8 @@ export default function ExpensesScreen() {
                   control={control}
                   name="materials"
                   render={({ field: { value, onChange, onBlur } }) => (
-                    <BottomSheetTextInput
+                    <ClearableTextInput
+                      InputComponent={BottomSheetTextInput}
                       style={[
                         styles.input,
                         {
@@ -673,7 +685,7 @@ export default function ExpensesScreen() {
 
               <View style={[styles.modalTotalRow, { backgroundColor: theme.colors.primary + '15' }]}>
                 <Text style={[styles.modalTotalLabel, { color: theme.colors.text }]}>Разом:</Text>
-                <Text style={[styles.modalTotalAmount, { color: theme.colors.primaryText }]}>
+                <Text style={[styles.modalTotalAmount, { color: emphasisColor }]}>
                   {formatCurrency(modalTotalAmount)}
                 </Text>
               </View>
@@ -805,6 +817,7 @@ const createStyles = (colors: any) =>
     },
     expenseCard: {
       borderRadius: 12,
+      gap: 12,
       padding: 16,
       marginBottom: 16,
       borderWidth: 1,
@@ -822,12 +835,11 @@ const createStyles = (colors: any) =>
       borderWidth: 1,
       borderRadius: 8,
       padding: 12,
-      marginBottom: 16,
     },
     inputRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      marginBottom: 12,
+    
     },
     inputLabel: {
       fontSize: 16,

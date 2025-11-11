@@ -61,7 +61,7 @@ const darkColors: ThemeColors = {
   shadow: 'rgba(44, 59, 83, 0.35)',
 };
 
-const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
+export const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const systemColorScheme = useColorScheme();
