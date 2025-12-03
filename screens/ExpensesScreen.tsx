@@ -29,6 +29,8 @@ import { Project, Expense, ExpenseFormData } from '../types';
 import { formatCurrency } from '../utils/helpers';
 import BottomSheet, { BottomSheetScrollView, BottomSheetTextInput } from '../components/BottomSheet';
 import ClearableTextInput from '../components/ClearableTextInput';
+import { showErrorToast, showSuccessToast, showWarningToast } from '../utils/toast';
+import { useConfirmDialog } from '../contexts/ConfirmDialogContext';
 
 const normalizeAmount = (value: string) => {
   if (value === undefined || value === null) {
@@ -76,6 +78,7 @@ type ExpenseFormValues = z.infer<typeof expenseSchema>;
 export default function ExpensesScreen() {
   const { user } = useAuth();
   const { theme } = useTheme();
+  const { showConfirm } = useConfirmDialog();
   const insets = useSafeAreaInsets();
   const route = useRoute<any>();
   const navigation = useNavigation<any>();
@@ -181,7 +184,7 @@ export default function ExpensesScreen() {
       } catch (error) {
         console.error('Не вдалося підписатися на витрати проєкту:', error);
         if (isMounted) {
-          Alert.alert('Помилка', 'У вас немає доступу до витрат цього проєкту');
+          showErrorToast('У вас немає доступу до витрат цього проєкту');
           setExpenses([]);
         }
       }
@@ -223,25 +226,23 @@ export default function ExpensesScreen() {
     setModalVisible(true);
   };
 
-  const handleDeleteExpense = (expense: Expense) => {
-    Alert.alert(
-      'Видалити категорію',
-      `Ви впевнені, що хочете видалити "${expense.categoryName}"?`,
-      [
-        { text: 'Скасувати', style: 'cancel' },
-        {
-          text: 'Видалити',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteExpense(expense.id);
-            } catch (error) {
-              Alert.alert('Помилка', 'Не вдалося видалити категорію');
-            }
-          },
-        },
-      ]
-    );
+  const handleDeleteExpense = async (expense: Expense) => {
+    const confirmed = await showConfirm({
+      title: 'Видалити категорію',
+      message: `Ви впевнені, що хочете видалити "${expense.categoryName}"?`,
+      confirmText: 'Видалити',
+      cancelText: 'Скасувати',
+      type: 'danger',
+    });
+
+    if (!confirmed) return;
+
+    try {
+      await deleteExpense(expense.id);
+      showSuccessToast('Категорію успішно видалено');
+    } catch (error) {
+      showErrorToast('Не вдалося видалити категорію');
+    }
   };
 
   const onSubmitExpense = handleExpenseSubmit(async (values) => {
@@ -292,7 +293,7 @@ export default function ExpensesScreen() {
 
   const handleInlineEditSave = async (expense: Expense) => {
     if (!editingCategoryName.trim()) {
-      Alert.alert('Помилка', 'Будь ласка, введіть назву категорії');
+      showWarningToast('Будь ласка, введіть назву категорії');
       return;
     }
 
@@ -300,7 +301,7 @@ export default function ExpensesScreen() {
     const materials = parseFloat(editingMaterials) || 0;
 
     if (labor < 0 || materials < 0) {
-      Alert.alert('Помилка', 'Сума не може бути від\'ємною');
+      showWarningToast('Сума не може бути від\'ємною');
       return;
     }
 
@@ -314,8 +315,9 @@ export default function ExpensesScreen() {
       });
       setEditingCategoryId(null);
       setEditingCategoryName('');
+      showSuccessToast('Зміни збережено');
     } catch (error) {
-      Alert.alert('Помилка', 'Не вдалося зберегти зміни');
+      showErrorToast('Не вдалося зберегти зміни');
     }
   };
 

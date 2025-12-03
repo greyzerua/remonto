@@ -18,6 +18,8 @@ import { logoutUser, updateDisplayName } from '../services/auth';
 import { grantProjectAccessByEmail, revokeProjectAccess, getUsersByIds, getAllUsers } from '../services/firestore';
 import { formatDateShort } from '../utils/helpers';
 import { removeEmail } from '../utils/secureStorage';
+import { showErrorToast, showSuccessToast, showWarningToast } from '../utils/toast';
+import { useConfirmDialog } from '../contexts/ConfirmDialogContext';
 import ClearableTextInput from '../components/ClearableTextInput';
 import { User } from '../types';
 import { Ionicons } from '@expo/vector-icons';
@@ -26,6 +28,7 @@ import BottomSheet, { BottomSheetScrollView } from '../components/BottomSheet';
 export default function SettingsScreen() {
   const { user, authUser, userData, refreshUserData } = useAuth();
   const { theme } = useTheme();
+  const { showConfirm } = useConfirmDialog();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const [sharedUsers, setSharedUsers] = useState<User[]>([]);
@@ -94,7 +97,7 @@ export default function SettingsScreen() {
       } catch (error) {
         console.error('Не вдалося завантажити користувачів:', error);
         if (isMounted) {
-          Alert.alert('Помилка', 'Не вдалося завантажити список користувачів');
+          showErrorToast('Не вдалося завантажити список користувачів');
         }
       } finally {
         if (isMounted) {
@@ -134,7 +137,7 @@ export default function SettingsScreen() {
       } catch (error) {
         console.error('Не вдалося завантажити користувачів з доступом:', error);
         if (isMounted) {
-          Alert.alert('Помилка', 'Не вдалося завантажити список користувачів з доступом');
+          showErrorToast('Не вдалося завантажити список користувачів з доступом');
         }
       } finally {
         if (isMounted) {
@@ -152,14 +155,14 @@ export default function SettingsScreen() {
 
   const handleGrantAccess = async () => {
     if (!user) {
-      Alert.alert('Помилка', 'Поточний користувач не авторизований');
+      showErrorToast('Поточний користувач не авторизований');
       return;
     }
 
     const trimmedEmail = accessEmail.trim();
 
     if (trimmedEmail.length === 0) {
-      Alert.alert('Увага', 'Введіть email користувача');
+      showWarningToast('Введіть email користувача');
       return;
     }
 
@@ -168,13 +171,13 @@ export default function SettingsScreen() {
       const grantedUser = await grantProjectAccessByEmail(user.uid, trimmedEmail);
       await refreshUserData();
       setAccessEmail('');
-      Alert.alert(
-        'Доступ надано',
-        `Користувач ${grantedUser.displayName || grantedUser.email} отримав доступ до ваших проєктів`
+      showSuccessToast(
+        `Користувач ${grantedUser.displayName || grantedUser.email} отримав доступ до ваших проєктів`,
+        'Доступ надано'
       );
     } catch (error: any) {
       const message = error?.message || 'Не вдалося надати доступ. Спробуйте ще раз.';
-      Alert.alert('Помилка', message);
+      showErrorToast(message);
     } finally {
       setIsGrantingAccess(false);
     }
@@ -182,19 +185,19 @@ export default function SettingsScreen() {
 
   const handleGrantAccessToUser = async (targetUser: User) => {
     if (!user) {
-      Alert.alert('Помилка', 'Поточний користувач не авторизований');
+      showErrorToast('Поточний користувач не авторизований');
       return;
     }
 
     if (targetUser.id === user.uid) {
-      Alert.alert('Увага', 'Ви не можете надати доступ собі');
+      showWarningToast('Ви не можете надати доступ собі');
       return;
     }
 
     // Перевіряємо чи вже є доступ
     const existingShared = userData?.sharedUsers || [];
     if (existingShared.includes(targetUser.id)) {
-      Alert.alert('Увага', 'Цей користувач вже має доступ до ваших проєктів');
+      showWarningToast('Цей користувач вже має доступ до ваших проєктів');
       return;
     }
 
@@ -202,13 +205,13 @@ export default function SettingsScreen() {
     try {
       await grantProjectAccessByEmail(user.uid, targetUser.email);
       await refreshUserData();
-      Alert.alert(
-        'Доступ надано',
-        `Користувач ${targetUser.displayName || targetUser.email} отримав доступ до ваших проєктів`
+      showSuccessToast(
+        `Користувач ${targetUser.displayName || targetUser.email} отримав доступ до ваших проєктів`,
+        'Доступ надано'
       );
     } catch (error: any) {
       const message = error?.message || 'Не вдалося надати доступ. Спробуйте ще раз.';
-      Alert.alert('Помилка', message);
+      showErrorToast(message);
     } finally {
       setIsGrantingAccess(false);
     }
@@ -223,35 +226,33 @@ export default function SettingsScreen() {
     return name.includes(query) || email.includes(query);
   });
 
-  const handleRevokeAccess = (member: User) => {
+  const handleRevokeAccess = async (member: User) => {
     if (!user) {
-      Alert.alert('Помилка', 'Поточний користувач не авторизований');
+      showErrorToast('Поточний користувач не авторизований');
       return;
     }
 
-    Alert.alert(
-      'Скасувати доступ',
-      `Ви впевнені, що хочете скасувати доступ для користувача ${member.displayName || member.email}?`,
-      [
-        { text: 'Скасувати', style: 'cancel' },
-        {
-          text: 'Скасувати доступ',
-          style: 'destructive',
-          onPress: async () => {
-            setRemovingUserId(member.id);
-            try {
-              await revokeProjectAccess(user.uid, member.id);
-              await refreshUserData();
-            } catch (error: any) {
-              const message = error?.message || 'Не вдалося скасувати доступ. Спробуйте ще раз.';
-              Alert.alert('Помилка', message);
-            } finally {
-              setRemovingUserId(null);
-            }
-          },
-        },
-      ]
-    );
+    const confirmed = await showConfirm({
+      title: 'Скасувати доступ',
+      message: `Ви впевнені, що хочете скасувати доступ для користувача ${member.displayName || member.email}?`,
+      confirmText: 'Скасувати доступ',
+      cancelText: 'Відмінити',
+      type: 'danger',
+    });
+
+    if (!confirmed) return;
+
+    setRemovingUserId(member.id);
+    try {
+      await revokeProjectAccess(user.uid, member.id);
+      await refreshUserData();
+      showSuccessToast('Доступ скасовано');
+    } catch (error: any) {
+      const message = error?.message || 'Не вдалося скасувати доступ. Спробуйте ще раз.';
+      showErrorToast(message);
+    } finally {
+      setRemovingUserId(null);
+    }
   };
 
   const handleSaveName = async () => {
@@ -274,11 +275,11 @@ export default function SettingsScreen() {
       await updateDisplayName(trimmedName);
       await refreshUserData();
       setIsEditingName(false);
-      Alert.alert('Успіх', 'Ім\'я успішно оновлено');
+      showSuccessToast('Ім\'я успішно оновлено');
     } catch (error: any) {
       const message = error?.message || 'Не вдалося оновити ім\'я. Спробуйте ще раз.';
       setNameError(message);
-      Alert.alert('Помилка', message);
+      showErrorToast(message);
     } finally {
       setIsUpdatingName(false);
     }
@@ -291,23 +292,24 @@ export default function SettingsScreen() {
     setNameError('');
   };
 
-  const handleLogout = () => {
-    Alert.alert('Вихід', 'Ви впевнені, що хочете вийти?', [
-      { text: 'Скасувати', style: 'cancel' },
-      {
-        text: 'Вийти',
-        style: 'destructive',
-        onPress: async () => {
-          await logoutUser();
-          // Очищаємо збережений email (паролів не зберігаємо!)
-          try {
-            await removeEmail();
-          } catch (error) {
-            console.error('Помилка очищення даних входу:', error);
-          }
-        },
-      },
-    ]);
+  const handleLogout = async () => {
+    const confirmed = await showConfirm({
+      title: 'Вихід',
+      message: 'Ви впевнені, що хочете вийти?',
+      confirmText: 'Вийти',
+      cancelText: 'Скасувати',
+      type: 'warning',
+    });
+
+    if (!confirmed) return;
+
+    await logoutUser();
+    // Очищаємо збережений email (паролів не зберігаємо!)
+    try {
+      await removeEmail();
+    } catch (error) {
+      console.error('Помилка очищення даних входу:', error);
+    }
   };
 
   const styles = createStyles(theme.colors);
@@ -758,6 +760,7 @@ const createStyles = (colors: any) =>
     emptySharedUsersText: {
       fontSize: 14,
       fontStyle: 'italic',
+      textAlign: 'center',
     },
     nameHeader: {
       flexDirection: 'row',

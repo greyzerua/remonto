@@ -29,6 +29,8 @@ import { Project, ProjectFormData, ProjectStatus } from '../types';
 import { formatDateShort, getStatusName } from '../utils/helpers';
 import BottomSheet, { BottomSheetScrollView, BottomSheetTextInput } from '../components/BottomSheet';
 import ClearableTextInput from '../components/ClearableTextInput';
+import { showErrorToast, showSuccessToast } from '../utils/toast';
+import { useConfirmDialog } from '../contexts/ConfirmDialogContext';
 
 const projectSchema = z.object({
   name: z.string().trim().min(1, 'Введіть назву проєкту'),
@@ -40,6 +42,7 @@ type ProjectFormValues = z.infer<typeof projectSchema>;
 export default function ProjectsScreen() {
   const { user, userData } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const { showConfirm } = useConfirmDialog();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -108,30 +111,28 @@ export default function ProjectsScreen() {
     navigation.navigate('Expenses', { projectId: project.id });
   };
 
-  const handleDeleteProject = (project: Project) => {
+  const handleDeleteProject = async (project: Project) => {
     if (!user) {
-      Alert.alert('Помилка', 'Помилка авторизації');
+      showErrorToast('Помилка авторизації');
       return;
     }
 
-    Alert.alert(
-      'Видалити проект',
-      `Ви впевнені, що хочете видалити проект "${project.name}"? Всі витрати також будуть видалені.`,
-      [
-        { text: 'Скасувати', style: 'cancel' },
-        {
-          text: 'Видалити',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteProject(project.id, user.uid);
-            } catch (error) {
-              Alert.alert('Помилка', 'Не вдалося видалити проект');
-            }
-          },
-        },
-      ]
-    );
+    const confirmed = await showConfirm({
+      title: 'Видалити проект',
+      message: `Ви впевнені, що хочете видалити проект "${project.name}"? Всі витрати також будуть видалені.`,
+      confirmText: 'Видалити',
+      cancelText: 'Скасувати',
+      type: 'danger',
+    });
+
+    if (!confirmed) return;
+
+    try {
+      await deleteProject(project.id, user.uid);
+      showSuccessToast('Проект успішно видалено');
+    } catch (error) {
+      showErrorToast('Не вдалося видалити проект');
+    }
   };
 
   const onSubmitProject = handleSubmit(async (values) => {

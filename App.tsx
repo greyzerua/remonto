@@ -9,10 +9,12 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
+import { ConfirmDialogProvider } from './contexts/ConfirmDialogContext';
 import AuthScreen from './screens/AuthScreen';
 import ProjectsScreen from './screens/ProjectsScreen';
 import ExpensesScreen from './screens/ExpensesScreen';
 import SettingsScreen from './screens/SettingsScreen';
+import ToastComponent from './components/Toast';
 
 const Tab = createBottomTabNavigator();
 
@@ -179,9 +181,12 @@ export default function App() {
       <SafeAreaProvider>
         <BottomSheetModalProvider>
           <ThemeProvider>
-            <AuthProvider>
-              <AppContent />
-            </AuthProvider>
+            <ConfirmDialogProvider>
+              <AuthProvider>
+                <AppContent />
+                <ToastComponent />
+              </AuthProvider>
+            </ConfirmDialogProvider>
           </ThemeProvider>
         </BottomSheetModalProvider>
       </SafeAreaProvider>
