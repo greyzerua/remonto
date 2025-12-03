@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   StyleSheet,
   Text,
@@ -7,25 +7,108 @@ import {
   Alert,
   ScrollView,
   ActivityIndicator,
+  Platform,
+  useWindowDimensions,
+  Keyboard,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { logoutUser } from '../services/auth';
-import { grantProjectAccessByEmail, revokeProjectAccess, getUsersByIds } from '../services/firestore';
+import { logoutUser, updateDisplayName } from '../services/auth';
+import { grantProjectAccessByEmail, revokeProjectAccess, getUsersByIds, getAllUsers } from '../services/firestore';
 import { formatDateShort } from '../utils/helpers';
 import { removeEmail } from '../utils/secureStorage';
 import ClearableTextInput from '../components/ClearableTextInput';
 import { User } from '../types';
+import { Ionicons } from '@expo/vector-icons';
+import BottomSheet, { BottomSheetScrollView } from '../components/BottomSheet';
 
 export default function SettingsScreen() {
   const { user, authUser, userData, refreshUserData } = useAuth();
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const [sharedUsers, setSharedUsers] = useState<User[]>([]);
   const [sharedUsersLoading, setSharedUsersLoading] = useState(false);
   const [accessEmail, setAccessEmail] = useState('');
   const [isGrantingAccess, setIsGrantingAccess] = useState(false);
   const [removingUserId, setRemovingUserId] = useState<string | null>(null);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [displayName, setDisplayName] = useState('');
+  const [isUpdatingName, setIsUpdatingName] = useState(false);
+  const [nameError, setNameError] = useState('');
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [allUsersLoading, setAllUsersLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [usersBottomSheetVisible, setUsersBottomSheetVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const bottomSheetSnapPoints = useMemo(
+    () => [Platform.OS === 'ios' ? 0.85 : 0.9],
+    []
+  );
+  const bottomSheetContentMaxHeight = useMemo(
+    () => windowHeight * (Platform.OS === 'ios' ? 0.75 : 0.8),
+    [windowHeight]
+  );
+
+  // Відстежуємо висоту клавіатури для iOS
+  useEffect(() => {
+    if (!usersBottomSheetVisible || Platform.OS !== 'ios') return;
+
+    const keyboardWillShow = Keyboard.addListener('keyboardWillShow', (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+
+    const keyboardWillHide = Keyboard.addListener('keyboardWillHide', () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      keyboardWillShow.remove();
+      keyboardWillHide.remove();
+    };
+  }, [usersBottomSheetVisible]);
+
+  useEffect(() => {
+    const currentName = userData?.displayName || authUser?.displayName || '';
+    setDisplayName(currentName);
+  }, [userData?.displayName, authUser?.displayName]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadAllUsers = async () => {
+      if (!user) return;
+
+      if (isMounted) {
+        setAllUsersLoading(true);
+      }
+
+      try {
+        const users = await getAllUsers();
+        // Виключаємо поточного користувача зі списку
+        const filteredUsers = users.filter(u => u.id !== user.uid);
+        if (isMounted) {
+          setAllUsers(filteredUsers);
+        }
+      } catch (error) {
+        console.error('Не вдалося завантажити користувачів:', error);
+        if (isMounted) {
+          Alert.alert('Помилка', 'Не вдалося завантажити список користувачів');
+        }
+      } finally {
+        if (isMounted) {
+          setAllUsersLoading(false);
+        }
+      }
+    };
+
+    loadAllUsers();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user]);
 
   useEffect(() => {
     let isMounted = true;
@@ -97,6 +180,49 @@ export default function SettingsScreen() {
     }
   };
 
+  const handleGrantAccessToUser = async (targetUser: User) => {
+    if (!user) {
+      Alert.alert('Помилка', 'Поточний користувач не авторизований');
+      return;
+    }
+
+    if (targetUser.id === user.uid) {
+      Alert.alert('Увага', 'Ви не можете надати доступ собі');
+      return;
+    }
+
+    // Перевіряємо чи вже є доступ
+    const existingShared = userData?.sharedUsers || [];
+    if (existingShared.includes(targetUser.id)) {
+      Alert.alert('Увага', 'Цей користувач вже має доступ до ваших проєктів');
+      return;
+    }
+
+    setIsGrantingAccess(true);
+    try {
+      await grantProjectAccessByEmail(user.uid, targetUser.email);
+      await refreshUserData();
+      Alert.alert(
+        'Доступ надано',
+        `Користувач ${targetUser.displayName || targetUser.email} отримав доступ до ваших проєктів`
+      );
+    } catch (error: any) {
+      const message = error?.message || 'Не вдалося надати доступ. Спробуйте ще раз.';
+      Alert.alert('Помилка', message);
+    } finally {
+      setIsGrantingAccess(false);
+    }
+  };
+
+  // Фільтруємо користувачів за пошуковим запитом
+  const filteredAllUsers = allUsers.filter(u => {
+    if (!searchQuery.trim()) return true;
+    const query = searchQuery.toLowerCase();
+    const name = (u.displayName || '').toLowerCase();
+    const email = (u.email || '').toLowerCase();
+    return name.includes(query) || email.includes(query);
+  });
+
   const handleRevokeAccess = (member: User) => {
     if (!user) {
       Alert.alert('Помилка', 'Поточний користувач не авторизований');
@@ -126,6 +252,43 @@ export default function SettingsScreen() {
         },
       ]
     );
+  };
+
+  const handleSaveName = async () => {
+    const trimmedName = displayName.trim();
+    
+    if (!trimmedName) {
+      setNameError('Ім\'я не може бути порожнім');
+      return;
+    }
+    
+    if (trimmedName.length < 2) {
+      setNameError('Ім\'я повинно містити мінімум 2 символи');
+      return;
+    }
+    
+    setIsUpdatingName(true);
+    setNameError('');
+    
+    try {
+      await updateDisplayName(trimmedName);
+      await refreshUserData();
+      setIsEditingName(false);
+      Alert.alert('Успіх', 'Ім\'я успішно оновлено');
+    } catch (error: any) {
+      const message = error?.message || 'Не вдалося оновити ім\'я. Спробуйте ще раз.';
+      setNameError(message);
+      Alert.alert('Помилка', message);
+    } finally {
+      setIsUpdatingName(false);
+    }
+  };
+
+  const handleCancelEditName = () => {
+    const currentName = userData?.displayName || authUser?.displayName || '';
+    setDisplayName(currentName);
+    setIsEditingName(false);
+    setNameError('');
   };
 
   const handleLogout = () => {
@@ -167,10 +330,81 @@ export default function SettingsScreen() {
                 <Text style={[styles.infoValue, { color: theme.colors.text }]}>{authUser?.email || 'Невідомо'}</Text>
               </View>
               <View style={[styles.infoCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-                <Text style={[styles.infoLabel, { color: theme.colors.textSecondary }]}>Ім'я</Text>
-                <Text style={[styles.infoValue, { color: theme.colors.text }]}>
-                  {userData?.displayName || authUser?.displayName || 'Не вказано'}
-                </Text>
+                <View style={styles.nameHeader}>
+                  <Text style={[styles.infoLabel, { color: theme.colors.textSecondary }]}>Ім'я</Text>
+                  {!isEditingName && (
+                    <TouchableOpacity
+                      onPress={() => setIsEditingName(true)}
+                      style={styles.editButton}
+                      disabled={isUpdatingName}
+                    >
+                      <Ionicons name="pencil-outline" size={18} color={theme.colors.primary} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+                {isEditingName ? (
+                  <View>
+                    <View
+                      style={[
+                        styles.nameInputWrapper,
+                        {
+                          backgroundColor: theme.colors.background,
+                          borderColor: nameError ? theme.colors.danger : theme.colors.border,
+                        },
+                      ]}
+                    >
+                      <ClearableTextInput
+                        value={displayName}
+                        onChangeText={text => {
+                          setDisplayName(text);
+                          if (nameError) {
+                            setNameError('');
+                          }
+                        }}
+                        placeholder="Введіть ім'я"
+                        placeholderTextColor={theme.colors.textSecondary}
+                        style={[styles.nameInput, { color: theme.colors.text }]}
+                        autoCapitalize="words"
+                        editable={!isUpdatingName}
+                        autoFocus
+                      />
+                    </View>
+                    {nameError ? <Text style={styles.nameErrorText}>{nameError}</Text> : null}
+                    <View style={styles.nameActions}>
+                      <TouchableOpacity
+                        onPress={handleCancelEditName}
+                        style={[styles.nameActionButton, { borderColor: theme.colors.border }]}
+                        disabled={isUpdatingName}
+                      >
+                        <Text style={[styles.nameActionButtonText, { color: theme.colors.textSecondary }]}>
+                          Скасувати
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={handleSaveName}
+                        style={[
+                          styles.nameActionButton,
+                          styles.nameActionButtonPrimary,
+                          { backgroundColor: theme.colors.primary },
+                          isUpdatingName && styles.nameActionButtonDisabled,
+                        ]}
+                        disabled={isUpdatingName}
+                      >
+                        {isUpdatingName ? (
+                          <ActivityIndicator color={theme.colors.primaryText} size="small" />
+                        ) : (
+                          <Text style={[styles.nameActionButtonText, { color: theme.colors.primaryText }]}>
+                            Зберегти
+                          </Text>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : (
+                  <Text style={[styles.infoValue, { color: theme.colors.text }]}>
+                    {userData?.displayName || authUser?.displayName || 'Не вказано'}
+                  </Text>
+                )}
               </View>
             </View>
           </View>
@@ -178,47 +412,25 @@ export default function SettingsScreen() {
           <View style={[styles.section, { borderBottomColor: theme.colors.border }]}>
             <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Доступ до проєктів</Text>
             <Text style={[styles.sectionDescription, { color: theme.colors.textSecondary }]}>
-              Надайте доступ до своїх проєктів іншим користувачам за email. Вони зможуть працювати з вашими даними в
+              Надайте доступ до своїх проєктів іншим користувачам. Вони зможуть працювати з вашими даними в
               режимі реального часу.
             </Text>
 
-            <View
+            <TouchableOpacity
               style={[
-                styles.shareInputContainer,
+                styles.selectUserButton,
                 {
-                  borderColor: theme.colors.border,
-                  backgroundColor: theme.colors.surface,
+                  backgroundColor: theme.colors.primary,
+                  borderColor: theme.colors.primary,
                 },
               ]}
+              onPress={() => setUsersBottomSheetVisible(true)}
             >
-              <ClearableTextInput
-                value={accessEmail}
-                onChangeText={setAccessEmail}
-                placeholder="email@example.com"
-                placeholderTextColor={theme.colors.textSecondary}
-                style={[styles.shareInput, { color: theme.colors.text }]}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="email-address"
-              />
-              <TouchableOpacity
-                style={[
-                  styles.shareButton,
-                  {
-                    backgroundColor: theme.colors.primary,
-                  },
-                  isGrantingAccess && styles.shareButtonDisabled,
-                ]}
-                onPress={handleGrantAccess}
-                disabled={isGrantingAccess}
-              >
-                {isGrantingAccess ? (
-                  <ActivityIndicator color={theme.colors.primaryText} />
-                ) : (
-                  <Text style={[styles.shareButtonText, { color: theme.colors.primaryText }]}>Надати доступ</Text>
-                )}
-              </TouchableOpacity>
-            </View>
+              <Ionicons name="person-add-outline" size={20} color={theme.colors.primaryText} />
+              <Text style={[styles.selectUserButtonText, { color: theme.colors.primaryText }]}>
+                Вибрати користувача
+              </Text>
+            </TouchableOpacity>
 
             <View style={styles.sharedUsersList}>
               {sharedUsersLoading ? (
@@ -266,6 +478,7 @@ export default function SettingsScreen() {
             </View>
           </View>
 
+
           <View style={[styles.section, styles.footerSection]}>
             <TouchableOpacity
               style={[styles.button, { backgroundColor: theme.colors.danger }]}
@@ -278,6 +491,113 @@ export default function SettingsScreen() {
           </View>
         </View>
       </ScrollView>
+
+      <BottomSheet
+        visible={usersBottomSheetVisible}
+        onClose={() => {
+          setUsersBottomSheetVisible(false);
+          setSearchQuery('');
+        }}
+        enablePanDownToClose={true}
+        enableBackdrop={true}
+        backdropOpacity={0.5}
+        snapPoints={bottomSheetSnapPoints}
+      >
+        <View style={styles.bottomSheetWrapper}>
+          <BottomSheetScrollView
+            keyboardShouldPersistTaps="handled"
+            style={{ maxHeight: bottomSheetContentMaxHeight }}
+            contentContainerStyle={[
+              styles.bottomSheetScrollContent,
+              { 
+                paddingBottom: insets.bottom + 24 + (Platform.OS === 'ios' ? keyboardHeight : 0),
+              },
+            ]}
+            showsVerticalScrollIndicator={true}
+            bounces={false}
+          >
+            <Text style={[styles.bottomSheetTitle, { color: theme.colors.text }]}>Вибрати користувача</Text>
+            <Text style={[styles.bottomSheetDescription, { color: theme.colors.textSecondary }]}>
+              Оберіть користувача зі списку або знайдіть за ім'ям або email
+            </Text>
+
+            <View
+              style={[
+                styles.searchInputContainer,
+                {
+                  borderColor: theme.colors.border,
+                  backgroundColor: theme.colors.background,
+                },
+              ]}
+            >
+              <Ionicons name="search-outline" size={20} color={theme.colors.textSecondary} style={styles.searchIcon} />
+              <ClearableTextInput
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder="Пошук за ім'ям або email..."
+                placeholderTextColor={theme.colors.textSecondary}
+                style={[styles.searchInput, { color: theme.colors.text }]}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+
+            <View style={styles.allUsersList}>
+              {allUsersLoading ? (
+                <View style={styles.loadingSharedUsers}>
+                  <ActivityIndicator color={theme.colors.primary} />
+                  <Text style={[styles.loadingSharedUsersText, { color: theme.colors.textSecondary }]}>
+                    Завантаження...
+                  </Text>
+                </View>
+              ) : filteredAllUsers.length === 0 ? (
+                <Text style={[styles.emptySharedUsersText, { color: theme.colors.textSecondary }]}>
+                  {searchQuery ? 'Користувачів не знайдено' : 'Користувачів не знайдено'}
+                </Text>
+              ) : (
+                filteredAllUsers.map((targetUser) => {
+                  const hasAccess = userData?.sharedUsers?.includes(targetUser.id) || false;
+                  return (
+                    <TouchableOpacity
+                      key={targetUser.id}
+                      style={[
+                        styles.allUserCard,
+                        { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+                        hasAccess && { opacity: 0.6 },
+                      ]}
+                      onPress={() => {
+                        if (!hasAccess) {
+                          handleGrantAccessToUser(targetUser);
+                          setUsersBottomSheetVisible(false);
+                          setSearchQuery('');
+                        }
+                      }}
+                      disabled={hasAccess || isGrantingAccess}
+                    >
+                      <View style={styles.allUserInfo}>
+                        <Text style={[styles.allUserName, { color: theme.colors.text }]}>
+                          {targetUser.displayName || targetUser.email}
+                        </Text>
+                        <Text style={[styles.allUserEmail, { color: theme.colors.textSecondary }]}>
+                          {targetUser.email}
+                        </Text>
+                      </View>
+                      {hasAccess ? (
+                        <View style={[styles.accessBadge, { backgroundColor: theme.colors.primary + '20' }]}>
+                          <Ionicons name="checkmark-circle" size={20} color={theme.colors.primary} />
+                          <Text style={[styles.accessBadgeText, { color: theme.colors.primary }]}>Доступ надано</Text>
+                        </View>
+                      ) : (
+                        <Ionicons name="chevron-forward-outline" size={20} color={theme.colors.textSecondary} />
+                      )}
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </View>
+          </BottomSheetScrollView>
+        </View>
+      </BottomSheet>
     </SafeAreaView>
   );
 }
@@ -438,6 +758,158 @@ const createStyles = (colors: any) =>
     emptySharedUsersText: {
       fontSize: 14,
       fontStyle: 'italic',
+    },
+    nameHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 4,
+    },
+    editButton: {
+      padding: 4,
+    },
+    nameInputWrapper: {
+      borderWidth: 1,
+      borderRadius: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      marginTop: 8,
+      marginBottom: 4,
+    },
+    nameInput: {
+      fontSize: 16,
+      fontWeight: '500',
+    },
+    nameErrorText: {
+      fontSize: 12,
+      color: colors.danger,
+      marginTop: 4,
+      marginBottom: 8,
+    },
+    nameActions: {
+      flexDirection: 'row',
+      gap: 12,
+      marginTop: 8,
+    },
+    nameActionButton: {
+      flex: 1,
+      borderWidth: 1,
+      borderRadius: 8,
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    nameActionButtonPrimary: {
+      borderWidth: 0,
+    },
+    nameActionButtonDisabled: {
+      opacity: 0.6,
+    },
+    nameActionButtonText: {
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    searchInputContainer: {
+      borderWidth: 1,
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 20,
+    },
+    searchIcon: {
+      marginRight: 8,
+    },
+    searchInput: {
+      flex: 1,
+      fontSize: 16,
+      paddingVertical: 4,
+    },
+    allUsersList: {
+      marginTop: 4,
+    },
+    allUserCard: {
+      borderWidth: 1,
+      borderRadius: 12,
+      padding: 16,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 12,
+    },
+    allUserInfo: {
+      flex: 1,
+      marginRight: 12,
+    },
+    allUserName: {
+      fontSize: 16,
+      fontWeight: '600',
+      marginBottom: 4,
+    },
+    allUserEmail: {
+      fontSize: 14,
+    },
+    grantButton: {
+      borderRadius: 8,
+      paddingVertical: 8,
+      paddingHorizontal: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+      minWidth: 120,
+    },
+    grantButtonText: {
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    grantButtonDisabled: {
+      opacity: 0.7,
+    },
+    accessBadge: {
+      borderRadius: 8,
+      paddingVertical: 8,
+      paddingHorizontal: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+      minWidth: 120,
+    },
+    accessBadgeText: {
+      fontSize: 14,
+      fontWeight: '600',
+      marginLeft: 6,
+    },
+    selectUserButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 12,
+      paddingVertical: 14,
+      paddingHorizontal: 20,
+      borderWidth: 1,
+      marginBottom: 20,
+      gap: 8,
+    },
+    selectUserButtonText: {
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    bottomSheetWrapper: {
+      flex: 1,
+      paddingHorizontal: 20,
+    },
+    bottomSheetScrollContent: {
+      paddingTop: 8,
+    },
+    bottomSheetTitle: {
+      fontSize: 24,
+      fontWeight: 'bold',
+      marginBottom: 8,
+    },
+    bottomSheetDescription: {
+      fontSize: 14,
+      marginBottom: 20,
+      lineHeight: 20,
     },
   });
 

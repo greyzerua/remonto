@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   StyleSheet,
   Text,
@@ -21,45 +21,55 @@ import { useTheme } from '../contexts/ThemeContext';
 import { getEmail, saveEmail } from '../utils/secureStorage';
 import ClearableTextInput from '../components/ClearableTextInput';
 
-const authSchema = z.object({
-  email: z
-    .string({ required_error: 'Email обов\'язковий' })
-    .trim()
-    .min(1, 'Email обов\'язковий')
-    .email('Введіть валідний email'),
-  password: z
-    .string({ required_error: 'Пароль обов\'язковий' })
-    .trim()
-    .min(6, 'Пароль повинен містити мінімум 6 символів'),
-});
+// Створюємо схему з умовною валідацією для displayName
+const createAuthSchema = (isLoginMode: boolean) => {
+  const baseSchema = z.object({
+    email: z
+      .string({ required_error: 'Email обов\'язковий' })
+      .trim()
+      .min(1, 'Email обов\'язковий')
+      .email('Введіть валідний email'),
+    password: z
+      .string({ required_error: 'Пароль обов\'язковий' })
+      .trim()
+      .min(6, 'Пароль повинен містити мінімум 6 символів'),
+    displayName: z.string().optional(),
+  });
 
-/**
- * Приклад асинхронної валідації з використанням Zod:
- *
- * const registrationSchema = authSchema.superRefine(async (data, ctx) => {
- *   const emailExists = await checkIfEmailExists(data.email);
- *   if (emailExists) {
- *     ctx.addIssue({
- *       path: ['email'],
- *       code: z.ZodIssueCode.custom,
- *       message: 'Цей email вже зареєстрований',
- *     });
- *   }
- * });
- *
- * У реальній формі нижче використано setError з React Hook Form для контролю помилок.
- */
+  if (isLoginMode) {
+    return baseSchema;
+  }
 
-type AuthFormValues = z.infer<typeof authSchema>;
+  // Для реєстрації робимо displayName обов'язковим
+  return baseSchema.extend({
+    displayName: z
+      .string({ required_error: 'Ім\'я обов\'язкове' })
+      .trim()
+      .min(1, 'Ім\'я обов\'язкове')
+      .min(2, 'Ім\'я повинно містити мінімум 2 символи'),
+  });
+};
+
+type AuthFormValues = {
+  email: string;
+  password: string;
+  displayName?: string;
+};
 
 export default function AuthScreen() {
   const [isLogin, setIsLogin] = useState(true);
-  const [displayName, setDisplayName] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
-  const [displayNameError, setDisplayNameError] = useState('');
   const [authError, setAuthError] = useState('');
+  const [savedEmail, setSavedEmail] = useState('');
   const { refreshUserData } = useAuth();
   const { theme } = useTheme();
+  
+  // Створюємо resolver динамічно залежно від режиму
+  const resolver = useMemo(
+    () => zodResolver(createAuthSchema(isLogin)),
+    [isLogin]
+  );
+  
   const {
     control,
     handleSubmit: formHandleSubmit,
@@ -67,14 +77,16 @@ export default function AuthScreen() {
     setValue,
     clearErrors,
     setError,
+    trigger,
   } = useForm<AuthFormValues>({
-    resolver: zodResolver(authSchema),
+    resolver,
     defaultValues: {
-      email: '',
+      email: savedEmail,
       password: '',
+      displayName: '',
     },
     mode: 'onSubmit',
-    reValidateMode: 'onSubmit',
+    reValidateMode: 'onChange',
   });
   const defaultBorderColor = theme.isDark
     ? 'rgba(140, 160, 188, 0.24)'
@@ -85,9 +97,10 @@ export default function AuthScreen() {
     const initialize = async () => {
       try {
         // Завантажуємо збережений email з SecureStore
-        const savedEmail = await getEmail();
-        if (savedEmail) {
-          setValue('email', savedEmail);
+        const email = await getEmail();
+        if (email) {
+          setSavedEmail(email);
+          setValue('email', email);
         }
       } catch (error) {
         console.error('Помилка ініціалізації:', error);
@@ -95,22 +108,29 @@ export default function AuthScreen() {
     };
     initialize();
   }, [setValue]);
+  
+  // Оновлюємо email в формі при зміні savedEmail
+  useEffect(() => {
+    if (savedEmail) {
+      setValue('email', savedEmail);
+    }
+  }, [savedEmail, setValue]);
 
   useEffect(() => {
     setPasswordVisible(false);
     clearErrors();
-    setDisplayNameError('');
     setAuthError('');
-  }, [isLogin, clearErrors]);
+    // Оновлюємо значення displayName при зміні режиму
+    setValue('displayName', '');
+  }, [isLogin, clearErrors, setValue]);
 
-  const handleSubmit = async ({ email, password }: AuthFormValues) => {
+  const handleSubmit = async (data: AuthFormValues) => {
     setAuthError('');
+    const { email, password, displayName } = data;
+    
     if (!isLogin) {
-      if (!displayName.trim()) {
-        setDisplayNameError('Будь ласка, введіть ваше ім\'я');
-        return;
-      }
-      setDisplayNameError('');
+      const trimmedDisplayName = displayName?.trim() || '';
+      
       try {
         const emailExists = await checkIfEmailExists(email);
         if (emailExists) {
@@ -124,49 +144,66 @@ export default function AuthScreen() {
         setAuthError('Не вдалося перевірити email. Спробуйте пізніше.');
         return;
       }
-    }
 
-    try {
-      if (isLogin) {
-        await loginUser(email, password);
-        // Зберігаємо email в SecureStore (без пароля!)
-        await saveEmail(email);
-      } else {
-        await registerUser(email, password, displayName.trim());
+      try {
+        const normalizedEmail = email.trim().toLowerCase();
+        await registerUser(normalizedEmail, password, trimmedDisplayName);
         await refreshUserData();
-        // Зберігаємо email в SecureStore (без пароля!)
-        await saveEmail(email);
+        // Зберігаємо нормалізований email в SecureStore (без пароля!)
+        await saveEmail(normalizedEmail);
+      } catch (error: any) {
+        if (error.code === 'auth/email-already-in-use') {
+          setError('email', {
+            type: 'manual',
+            message: 'Цей email вже зареєстрований',
+          });
+        } else if (error.code === 'auth/invalid-email') {
+          setError('email', {
+            type: 'manual',
+            message: 'Невірний формат email',
+          });
+        } else if (error.code === 'auth/weak-password') {
+          setError('password', {
+            type: 'manual',
+            message: 'Пароль занадто слабкий',
+          });
+        }
+        setAuthError('Сталася помилка. Перевірте введені дані та спробуйте ще раз.');
+        return;
       }
-      clearErrors();
-    } catch (error: any) {
-      if (error.code === 'auth/email-already-in-use') {
-        setError('email', {
-          type: 'manual',
-          message: 'Цей email вже зареєстрований',
-        });
-      } else if (error.code === 'auth/invalid-email') {
-        setError('email', {
-          type: 'manual',
-          message: 'Невірний формат email',
-        });
-      } else if (error.code === 'auth/user-not-found') {
-        setError('email', {
-          type: 'manual',
-          message: 'Користувача не знайдено',
-        });
-      } else if (error.code === 'auth/wrong-password') {
-        setError('password', {
-          type: 'manual',
-          message: 'Невірний пароль',
-        });
-      } else if (error.code === 'auth/weak-password') {
-        setError('password', {
-          type: 'manual',
-          message: 'Пароль занадто слабкий',
-        });
+    } else {
+      try {
+        const normalizedEmail = email.trim().toLowerCase();
+        await loginUser(normalizedEmail, password);
+        // Зберігаємо нормалізований email в SecureStore (без пароля!)
+        await saveEmail(normalizedEmail);
+      } catch (error: any) {
+        if (error.code === 'auth/invalid-email') {
+          setError('email', {
+            type: 'manual',
+            message: 'Невірний формат email',
+          });
+        } else if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
+          setError('email', {
+            type: 'manual',
+            message: 'Невірний email або пароль',
+          });
+          setError('password', {
+            type: 'manual',
+            message: 'Невірний email або пароль',
+          });
+        } else if (error.code === 'auth/wrong-password') {
+          setError('password', {
+            type: 'manual',
+            message: 'Невірний пароль',
+          });
+        }
+        setAuthError('Сталася помилка. Перевірте введені дані та спробуйте ще раз.');
+        return;
       }
-      setAuthError('Сталася помилка. Перевірте введені дані та спробуйте ще раз.');
     }
+    
+    clearErrors();
   };
 
   const styles = createStyles(theme.colors);
@@ -194,28 +231,36 @@ export default function AuthScreen() {
                     styles.inputWrapper,
                     {
                       backgroundColor: theme.colors.surface,
-                      borderColor: displayNameError ? theme.colors.danger : defaultBorderColor,
+                      borderColor: errors.displayName ? theme.colors.danger : defaultBorderColor,
                       shadowColor: theme.colors.shadow,
                     },
                   ]}
                 >
-                  <ClearableTextInput
-                    containerStyle={{ flex: 1 }}
-                    style={[styles.input, { color: theme.colors.text }]}
-                    placeholder="Як до вас звертатися?"
-                    placeholderTextColor={theme.colors.textSecondary}
-                    value={displayName}
-                    onChangeText={text => {
-                      setDisplayName(text);
-                      if (displayNameError) {
-                        setDisplayNameError('');
-                      }
+                  <Controller
+                    control={control}
+                    name="displayName"
+                    rules={{
+                      required: !isLogin ? 'Ім\'я обов\'язкове' : false,
+                      minLength: !isLogin ? { value: 2, message: 'Ім\'я повинно містити мінімум 2 символи' } : undefined,
                     }}
-                    autoCapitalize="words"
-                    editable={!isSubmitting}
+                    render={({ field: { onChange, onBlur, value } }) => (
+                      <ClearableTextInput
+                        containerStyle={{ flex: 1 }}
+                        style={[styles.input, { color: theme.colors.text }]}
+                        placeholder="Як до вас звертатися?"
+                        placeholderTextColor={theme.colors.textSecondary}
+                        value={value ?? ''}
+                        onChangeText={onChange}
+                        onBlur={onBlur}
+                        autoCapitalize="words"
+                        editable={!isSubmitting}
+                      />
+                    )}
                   />
                 </View>
-                {displayNameError ? <Text style={styles.errorText}>{displayNameError}</Text> : null}
+                {errors.displayName?.message ? (
+                  <Text style={styles.errorText}>{errors.displayName.message}</Text>
+                ) : null}
               </View>
             )}
 

@@ -7,7 +7,7 @@ import {
   updateProfile,
   fetchSignInMethodsForEmail,
 } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import { User, AuthUser } from '../types';
 
@@ -17,19 +17,22 @@ import { User, AuthUser } from '../types';
 export async function registerUser(
   email: string,
   password: string,
-  displayName?: string
+  displayName: string
 ): Promise<FirebaseUser> {
   try {
     const trimmedEmail = email.trim();
     const normalizedEmail = trimmedEmail.toLowerCase();
+    const trimmedDisplayName = displayName.trim();
+
+    if (!trimmedDisplayName) {
+      throw new Error('Ім\'я обов\'язкове для реєстрації');
+    }
 
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     const user = userCredential.user;
 
     // Оновлюємо профіль з ім'ям
-    if (displayName) {
-      await updateProfile(user, { displayName });
-    }
+    await updateProfile(user, { displayName: trimmedDisplayName });
 
     // Створюємо документ користувача в Firestore
     // Виключаємо поля з undefined значеннями (Firestore не підтримує undefined)
@@ -37,14 +40,12 @@ export async function registerUser(
       id: user.uid,
       email: (user.email || trimmedEmail).toLowerCase(),
       emailLowercase: normalizedEmail,
+      displayName: trimmedDisplayName,
       createdAt: new Date().toISOString(),
       sharedUsers: [],
     };
 
     // Додаємо опціональні поля тільки якщо вони існують
-    if (displayName) {
-      userData.displayName = displayName;
-    }
     if (user.photoURL) {
       userData.photoURL = user.photoURL;
     }
@@ -75,7 +76,11 @@ export async function checkIfEmailExists(email: string): Promise<boolean> {
  */
 export async function loginUser(email: string, password: string): Promise<FirebaseUser> {
   try {
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    // Нормалізуємо email (обрізаємо пробіли та переводимо в нижній регістр)
+    const trimmedEmail = email.trim();
+    const normalizedEmail = trimmedEmail.toLowerCase();
+    
+    const userCredential = await signInWithEmailAndPassword(auth, normalizedEmail, password);
     return userCredential.user;
   } catch (error: any) {
     console.error('Помилка входу:', error);
@@ -138,6 +143,38 @@ export async function getUserData(uid: string): Promise<User | null> {
   } catch (error) {
     console.error('Помилка отримання даних користувача:', error);
     return null;
+  }
+}
+
+/**
+ * Оновити ім'я користувача
+ */
+export async function updateDisplayName(displayName: string): Promise<void> {
+  try {
+    const user = auth.currentUser;
+    if (!user) {
+      throw new Error('Користувач не авторизований');
+    }
+
+    const trimmedDisplayName = displayName.trim();
+    if (!trimmedDisplayName) {
+      throw new Error('Ім\'я не може бути порожнім');
+    }
+
+    if (trimmedDisplayName.length < 2) {
+      throw new Error('Ім\'я повинно містити мінімум 2 символи');
+    }
+
+    // Оновлюємо профіль в Firebase Auth
+    await updateProfile(user, { displayName: trimmedDisplayName });
+
+    // Оновлюємо документ в Firestore
+    await updateDoc(doc(db, 'users', user.uid), {
+      displayName: trimmedDisplayName,
+    });
+  } catch (error: any) {
+    console.error('Помилка оновлення імені:', error);
+    throw error;
   }
 }
 

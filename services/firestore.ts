@@ -166,6 +166,31 @@ export async function getUsersByIds(ids: string[]): Promise<User[]> {
   return results.filter((user): user is User => Boolean(user));
 }
 
+/**
+ * Отримати всіх користувачів з Firestore
+ */
+export async function getAllUsers(): Promise<User[]> {
+  try {
+    const usersRef = collection(db, USERS_COLLECTION);
+    const snapshot = await getDocs(usersRef);
+    const users: User[] = [];
+    
+    snapshot.forEach((docSnap) => {
+      users.push({ id: docSnap.id, ...docSnap.data() } as User);
+    });
+    
+    // Сортуємо за ім'ям або email
+    return users.sort((a, b) => {
+      const nameA = (a.displayName || a.email || '').toLowerCase();
+      const nameB = (b.displayName || b.email || '').toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+  } catch (error) {
+    console.error('Помилка отримання всіх користувачів:', error);
+    throw error;
+  }
+}
+
 export async function grantProjectAccessByEmail(ownerId: string, email: string): Promise<User> {
   const targetUser = await findUserByEmail(email);
 
