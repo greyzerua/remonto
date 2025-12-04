@@ -91,6 +91,7 @@ export default function ExpensesScreen() {
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const previousProjectsRef = useRef<Map<string, Project>>(new Map());
   const isInitialLoadRef = useRef(true);
+  const hasSeenSharedProjectsRef = useRef(false);
   const bottomSheetSnapPoints = useMemo(
     () => [Platform.OS === 'ios' ? 0.7 : 0.92],
     []
@@ -138,11 +139,18 @@ export default function ExpensesScreen() {
     if (!user) return;
 
     const unsubscribe = subscribeToProjects(user.uid, (updatedProjects) => {
+      const currentProjectsMap = new Map(updatedProjects.map(p => [p.id, p]));
+      const previousProjectsMap = previousProjectsRef.current;
+      
+      // Перевіряємо, чи є спільні проекти в поточному списку
+      const hasSharedProjects = updatedProjects.some(p => p.createdBy !== user.uid);
+      
       // Перевіряємо нові проєкти, до яких надали доступ, та проєкти, з яких забрали доступ
-      if (!isInitialLoadRef.current) {
-        const currentProjectsMap = new Map(updatedProjects.map(p => [p.id, p]));
-        const previousProjectsMap = previousProjectsRef.current;
-        
+      // Показуємо тости тільки якщо:
+      // 1. Це не перше завантаження
+      // 2. Є попередні проекти для порівняння
+      // 3. Ми вже бачили спільні проекти раніше (щоб не показувати тости при першому завантаженні спільних проектів)
+      if (!isInitialLoadRef.current && previousProjectsMap.size > 0 && hasSeenSharedProjectsRef.current) {
         // Знаходимо нові проєкти (ті, які не створені поточним користувачем)
         const newSharedProjects = updatedProjects.filter(project => {
           const isNew = !previousProjectsMap.has(project.id);
@@ -206,12 +214,20 @@ export default function ExpensesScreen() {
             'Доступ скасовано'
           );
         }
-      } else {
-        isInitialLoadRef.current = false;
       }
 
+      // Відстежуємо, чи ми бачили спільні проекти
+      if (hasSharedProjects) {
+        hasSeenSharedProjectsRef.current = true;
+      }
+      
       // Оновлюємо список проєктів
       previousProjectsRef.current = new Map(updatedProjects.map(p => [p.id, p]));
+      
+      // Після першого оновлення вважаємо що початкове завантаження завершено
+      if (isInitialLoadRef.current) {
+        isInitialLoadRef.current = false;
+      }
       setProjects(updatedProjects);
       setLoading(false);
     });
