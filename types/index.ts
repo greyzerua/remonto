@@ -9,7 +9,7 @@ export interface User {
   sharedUsers?: string[];
 }
 
-// Типи для проектів ремонту
+// Типи для проєктів ремонту
 export type ProjectStatus = 'active' | 'completed' | 'paused' | 'planned';
 
 export interface Project {
@@ -28,7 +28,7 @@ export interface Project {
 // Типи для витрат (категорій витрат)
 export interface Expense {
   id: string;
-  projectId: string; // ID проекту, до якого належить витрата
+  projectId: string; // ID проєкту, до якого належить витрата
   categoryName: string; // Назва категорії (користувач вводить сам)
   labor: number; // Сума за роботу
   materials: number; // Сума за матеріали
@@ -40,7 +40,7 @@ export interface Expense {
 
 // Допоміжні типи для статистики
 export interface ProjectWithExpenses extends Project {
-  totalExpenses: number; // Загальна сума витрат по проекту
+  totalExpenses: number; // Загальна сума витрат по проєкту
   expensesCount: number; // Кількість витрат
 }
 

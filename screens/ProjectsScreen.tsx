@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   StyleSheet,
   Text,
@@ -29,7 +29,7 @@ import { Project, ProjectFormData, ProjectStatus } from '../types';
 import { formatDateShort, getStatusName } from '../utils/helpers';
 import BottomSheet, { BottomSheetScrollView, BottomSheetTextInput } from '../components/BottomSheet';
 import ClearableTextInput from '../components/ClearableTextInput';
-import { showErrorToast, showSuccessToast } from '../utils/toast';
+import { showErrorToast, showSuccessToast, showWarningToast } from '../utils/toast';
 import { useConfirmDialog } from '../contexts/ConfirmDialogContext';
 
 const projectSchema = z.object({
@@ -49,6 +49,8 @@ export default function ProjectsScreen() {
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const previousProjectsRef = useRef<Map<string, Project>>(new Map());
+  const isInitialLoadRef = useRef(true);
   const bottomSheetSnapPoints = useMemo(
     () => [Platform.OS === 'ios' ? 0.7 : 0.9],
     []
@@ -80,6 +82,80 @@ export default function ProjectsScreen() {
     if (!user) return;
 
     const unsubscribe = subscribeToProjects(user.uid, (updatedProjects) => {
+      // Перевіряємо нові проєкти, до яких надали доступ, та проєкти, з яких забрали доступ
+      if (!isInitialLoadRef.current) {
+        const currentProjectsMap = new Map(updatedProjects.map(p => [p.id, p]));
+        const previousProjectsMap = previousProjectsRef.current;
+        
+        // Знаходимо нові проєкти (ті, які не створені поточним користувачем)
+        const newSharedProjects = updatedProjects.filter(project => {
+          const isNew = !previousProjectsMap.has(project.id);
+          const isShared = project.createdBy !== user.uid;
+          return isNew && isShared;
+        });
+
+        // Показуємо один Toast з кількістю нових проектів
+        if (newSharedProjects.length > 0) {
+          const projectsCount = newSharedProjects.length;
+          let projectWord;
+          const lastDigit = projectsCount % 10;
+          const lastTwoDigits = projectsCount % 100;
+          
+          if (lastTwoDigits >= 11 && lastTwoDigits <= 19) {
+            projectWord = 'проєктів';
+          } else if (lastDigit === 1) {
+            projectWord = 'проєкту';
+          } else if (lastDigit >= 2 && lastDigit <= 4) {
+            projectWord = 'проєктів';
+          } else {
+            projectWord = 'проєктів';
+          }
+          
+          showSuccessToast(
+            `Вам надали доступ до ${projectsCount} ${projectWord}`,
+            'Новий доступ'
+          );
+        }
+
+        // Знаходимо проєкти, з яких забрали доступ (ті, що були в попередньому списку, але відсутні в поточному)
+        const revokedProjects: Project[] = [];
+        previousProjectsMap.forEach((previousProject, projectId) => {
+          if (!currentProjectsMap.has(projectId)) {
+            // Перевіряємо, чи це був спільний проєкт (не створений поточним користувачем)
+            if (previousProject.createdBy !== user.uid) {
+              revokedProjects.push(previousProject);
+            }
+          }
+        });
+
+        // Показуємо один тост з кількістю проектів, з яких забрали доступ
+        if (revokedProjects.length > 0) {
+          const projectsCount = revokedProjects.length;
+          let projectWord;
+          const lastDigit = projectsCount % 10;
+          const lastTwoDigits = projectsCount % 100;
+          
+          if (lastTwoDigits >= 11 && lastTwoDigits <= 19) {
+            projectWord = 'проєктів';
+          } else if (lastDigit === 1) {
+            projectWord = 'проєкту';
+          } else if (lastDigit >= 2 && lastDigit <= 4) {
+            projectWord = 'проєктів';
+          } else {
+            projectWord = 'проєктів';
+          }
+          
+          showWarningToast(
+            `У вас забрали доступ до ${projectsCount} ${projectWord}`,
+            'Доступ скасовано'
+          );
+        }
+      } else {
+        isInitialLoadRef.current = false;
+      }
+
+      // Оновлюємо список проєктів
+      previousProjectsRef.current = new Map(updatedProjects.map(p => [p.id, p]));
       setProjects(updatedProjects);
       setLoading(false);
     });
@@ -117,9 +193,15 @@ export default function ProjectsScreen() {
       return;
     }
 
+    // Перевіряємо, чи користувач є власником проєкту
+    if (project.createdBy !== user.uid) {
+      showWarningToast('Ви не можете видалити цей проєкт, оскільки ви не є його власником');
+      return;
+    }
+
     const confirmed = await showConfirm({
-      title: 'Видалити проект',
-      message: `Ви впевнені, що хочете видалити проект "${project.name}"? Всі витрати також будуть видалені.`,
+      title: 'Видалити проєкт',
+      message: `Ви впевнені, що хочете видалити проєкт "${project.name}"? Всі витрати також будуть видалені.`,
       confirmText: 'Видалити',
       cancelText: 'Скасувати',
       type: 'danger',
@@ -129,9 +211,10 @@ export default function ProjectsScreen() {
 
     try {
       await deleteProject(project.id, user.uid);
-      showSuccessToast('Проект успішно видалено');
-    } catch (error) {
-      showErrorToast('Не вдалося видалити проект');
+      showSuccessToast('Проєкт успішно видалено');
+    } catch (error: any) {
+      const message = error?.message || 'Не вдалося видалити проєкт';
+      showErrorToast(message);
     }
   };
 
@@ -150,9 +233,11 @@ export default function ProjectsScreen() {
 
     try {
       if (editingProject) {
-        await updateProject(editingProject.id, payload);
+        await updateProject(editingProject.id, payload, user.uid);
+        showSuccessToast('Проєкт успішно оновлено');
       } else {
-        await createProject(payload, user.uid, userData?.sharedUsers ?? []);
+        await createProject(payload, user.uid);
+        showSuccessToast('Проєкт успішно створено');
       }
       setModalVisible(false);
       setEditingProject(null);
@@ -160,10 +245,16 @@ export default function ProjectsScreen() {
         name: '',
         status: 'active',
       });
-    } catch (error) {
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Не вдалося зберегти проєкт. Спробуйте ще раз.';
+      if (errorMessage.includes('прав') || errorMessage.includes('permissions')) {
+        showWarningToast('Ви не маєте прав на редагування цього проєкту');
+      } else {
+        showErrorToast(errorMessage);
+      }
       setError('name', {
         type: 'manual',
-        message: 'Не вдалося зберегти проєкт. Спробуйте ще раз.',
+        message: errorMessage,
       });
     }
   });
@@ -275,15 +366,15 @@ export default function ProjectsScreen() {
 
         {projects.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>Немає проектів</Text>
+            <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>Немає проєктів</Text>
             <Text style={[styles.emptyText, { color: theme.colors.textSecondary }]}>
-              Створіть перший проект ремонту, щоб почати облік витрат
+              Створіть перший проєкт ремонту, щоб почати облік витрат
             </Text>
             <TouchableOpacity
               style={[styles.createButton, { backgroundColor: theme.colors.primary }]}
               onPress={handleCreateProject}
             >
-              <Text style={[styles.createButtonText, { color: theme.colors.primaryText }]}>Створити проект</Text>
+              <Text style={[styles.createButtonText, { color: theme.colors.primaryText }]}>Створити проєкт</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -302,7 +393,7 @@ export default function ProjectsScreen() {
                 style={[styles.addButton, { backgroundColor: theme.colors.primary }]}
                 onPress={handleCreateProject}
               >
-                <Text style={[styles.addButtonText, { color: theme.colors.primaryText }]}>Додати проект</Text>
+                <Text style={[styles.addButtonText, { color: theme.colors.primaryText }]}>Додати проєкт</Text>
               </TouchableOpacity>
             </View>
           </>
@@ -337,7 +428,7 @@ export default function ProjectsScreen() {
               bounces={false}
             >
               <Text style={[styles.modalTitle, { color: theme.colors.text }]}>
-                {editingProject ? 'Редагувати проект' : 'Новий проект'}
+                {editingProject ? 'Редагувати проєкт' : 'Новий проєкт'}
               </Text>
 
               <View style={styles.inputContainer}>

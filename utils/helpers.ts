@@ -65,7 +65,7 @@ export function getCategoryName(category: string): string {
 }
 
 /**
- * Отримати назву статусу проекту
+ * Отримати назву статусу проєкту
  */
 export function getStatusName(status: string): string {
   const names: Record<string, string> = {

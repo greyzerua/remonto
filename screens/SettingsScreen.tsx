@@ -15,13 +15,21 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { logoutUser, updateDisplayName } from '../services/auth';
-import { grantProjectAccessByEmail, revokeProjectAccess, getUsersByIds, getAllUsers } from '../services/firestore';
+import { 
+  grantProjectAccessByEmail, 
+  revokeProjectAccess, 
+  getUsersByIds, 
+  getAllUsers,
+  getOwnerProjects,
+  grantProjectAccessToSelectedProjects,
+  revokeProjectAccessFromSelectedProjects,
+} from '../services/firestore';
 import { formatDateShort } from '../utils/helpers';
 import { removeEmail } from '../utils/secureStorage';
 import { showErrorToast, showSuccessToast, showWarningToast } from '../utils/toast';
 import { useConfirmDialog } from '../contexts/ConfirmDialogContext';
 import ClearableTextInput from '../components/ClearableTextInput';
-import { User } from '../types';
+import { User, Project } from '../types';
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '../components/BottomSheet';
 
@@ -45,6 +53,14 @@ export default function SettingsScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [usersBottomSheetVisible, setUsersBottomSheetVisible] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [projectsBottomSheetVisible, setProjectsBottomSheetVisible] = useState(false);
+  const [revokeProjectsBottomSheetVisible, setRevokeProjectsBottomSheetVisible] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [ownerProjects, setOwnerProjects] = useState<Project[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(new Set());
+  const [selectedProjectsToRevoke, setSelectedProjectsToRevoke] = useState<Set<string>>(new Set());
+  const [isRevokingAccess, setIsRevokingAccess] = useState(false);
   const bottomSheetSnapPoints = useMemo(
     () => [Platform.OS === 'ios' ? 0.85 : 0.9],
     []
@@ -194,21 +210,149 @@ export default function SettingsScreen() {
       return;
     }
 
-    // Перевіряємо чи вже є доступ
-    const existingShared = userData?.sharedUsers || [];
-    if (existingShared.includes(targetUser.id)) {
-      showWarningToast('Цей користувач вже має доступ до ваших проєктів');
+    // Відкриваємо модальне вікно для вибору проектів
+    setSelectedUser(targetUser);
+    setUsersBottomSheetVisible(false);
+    setSearchQuery('');
+    await loadOwnerProjects();
+    setProjectsBottomSheetVisible(true);
+  };
+
+  const handleAddProjectsToUser = async (targetUser: User) => {
+    if (!user) {
+      showErrorToast('Поточний користувач не авторизований');
+      return;
+    }
+
+    // Відкриваємо модальне вікно для вибору проектів
+    setSelectedUser(targetUser);
+    await loadOwnerProjects();
+    setProjectsBottomSheetVisible(true);
+  };
+
+  const handleRevokeProjectsFromUser = async (targetUser: User) => {
+    if (!user) {
+      showErrorToast('Поточний користувач не авторизований');
+      return;
+    }
+
+    // Завантажуємо проекти (не відмічаємо автоматично - користувач сам вибирає)
+    setSelectedUser(targetUser);
+    setSelectedProjectsToRevoke(new Set());
+    setProjectsLoading(true);
+    try {
+      const projects = await getOwnerProjects(user.uid);
+      setOwnerProjects(projects);
+    } catch (error) {
+      console.error('Не вдалося завантажити проєкти:', error);
+      showErrorToast('Не вдалося завантажити список проєктів');
+    } finally {
+      setProjectsLoading(false);
+    }
+    
+    setRevokeProjectsBottomSheetVisible(true);
+  };
+
+  const handleToggleRevokeProjectSelection = (projectId: string) => {
+    const newSelected = new Set(selectedProjectsToRevoke);
+    if (newSelected.has(projectId)) {
+      newSelected.delete(projectId);
+    } else {
+      newSelected.add(projectId);
+    }
+    setSelectedProjectsToRevoke(newSelected);
+  };
+
+  const handleConfirmRevokeProjects = async () => {
+    if (!user || !selectedUser) {
+      showErrorToast('Помилка: користувач не вибраний');
+      return;
+    }
+
+    if (selectedProjectsToRevoke.size === 0) {
+      showWarningToast('Виберіть хоча б один проєкт');
+      return;
+    }
+
+    const projectsCount = selectedProjectsToRevoke.size;
+    setIsRevokingAccess(true);
+    try {
+      await revokeProjectAccessFromSelectedProjects(
+        user.uid,
+        selectedUser.id,
+        Array.from(selectedProjectsToRevoke)
+      );
+      await refreshUserData();
+      setRevokeProjectsBottomSheetVisible(false);
+      setSelectedUser(null);
+      setSelectedProjectsToRevoke(new Set());
+      
+      const message = `Доступ до ${projectsCount} проєкт${projectsCount === 1 ? 'у' : projectsCount < 5 ? 'ів' : 'ів'} забрано`;
+      showSuccessToast(message, 'Доступ скасовано');
+    } catch (error: any) {
+      const message = error?.message || 'Не вдалося забрати доступ. Спробуйте ще раз.';
+      showErrorToast(message);
+    } finally {
+      setIsRevokingAccess(false);
+    }
+  };
+
+  const loadOwnerProjects = async (memberId?: string) => {
+    if (!user) return;
+
+    setProjectsLoading(true);
+    try {
+      const projects = await getOwnerProjects(user.uid);
+      setOwnerProjects(projects);
+      // Не відмічаємо автоматично - користувач сам вибирає проекти
+      setSelectedProjectIds(new Set());
+    } catch (error) {
+      console.error('Не вдалося завантажити проєкти:', error);
+      showErrorToast('Не вдалося завантажити список проєктів');
+    } finally {
+      setProjectsLoading(false);
+    }
+  };
+
+  const handleToggleProjectSelection = (projectId: string) => {
+    const newSelected = new Set(selectedProjectIds);
+    if (newSelected.has(projectId)) {
+      newSelected.delete(projectId);
+    } else {
+      newSelected.add(projectId);
+    }
+    setSelectedProjectIds(newSelected);
+  };
+
+  const handleConfirmProjectSelection = async () => {
+    if (!user || !selectedUser) {
+      showErrorToast('Помилка: користувач не вибраний');
+      return;
+    }
+
+    if (selectedProjectIds.size === 0) {
+      showWarningToast('Виберіть хоча б один проєкт');
       return;
     }
 
     setIsGrantingAccess(true);
     try {
-      await grantProjectAccessByEmail(user.uid, targetUser.email);
-      await refreshUserData();
-      showSuccessToast(
-        `Користувач ${targetUser.displayName || targetUser.email} отримав доступ до ваших проєктів`,
-        'Доступ надано'
+      const result = await grantProjectAccessToSelectedProjects(
+        user.uid,
+        selectedUser.id,
+        Array.from(selectedProjectIds)
       );
+      await refreshUserData();
+      setProjectsBottomSheetVisible(false);
+      setSelectedUser(null);
+      setSelectedProjectIds(new Set());
+      
+      if (result.added > 0) {
+        const message = `Користувач ${selectedUser.displayName || selectedUser.email} отримав доступ до ${result.added} проєкт${result.added === 1 ? 'у' : result.added < 5 ? 'ів' : 'ів'}`;
+        showSuccessToast(message, 'Доступ надано');
+      } else {
+        showWarningToast('Користувач вже має доступ до всіх вибраних проєктів');
+      }
     } catch (error: any) {
       const message = error?.message || 'Не вдалося надати доступ. Спробуйте ще раз.';
       showErrorToast(message);
@@ -246,7 +390,10 @@ export default function SettingsScreen() {
     try {
       await revokeProjectAccess(user.uid, member.id);
       await refreshUserData();
-      showSuccessToast('Доступ скасовано');
+      showSuccessToast(
+        `Доступ для користувача ${member.displayName || member.email} скасовано`,
+        'Доступ скасовано'
+      );
     } catch (error: any) {
       const message = error?.message || 'Не вдалося скасувати доступ. Спробуйте ще раз.';
       showErrorToast(message);
@@ -463,17 +610,33 @@ export default function SettingsScreen() {
                         {member.email}
                       </Text>
                     </View>
-                    <TouchableOpacity
-                      style={[styles.revokeButton, { borderColor: theme.colors.danger }]}
-                      onPress={() => handleRevokeAccess(member)}
-                      disabled={removingUserId === member.id}
-                    >
-                      {removingUserId === member.id ? (
-                        <ActivityIndicator color={theme.colors.danger} />
-                      ) : (
-                        <Text style={[styles.revokeButtonText, { color: theme.colors.danger }]}>Скасувати</Text>
-                      )}
-                    </TouchableOpacity>
+                    <View style={styles.sharedUserActions}>
+                      <TouchableOpacity
+                        style={[styles.actionButton, { borderColor: '#34C759' }]}
+                        onPress={() => handleAddProjectsToUser(member)}
+                        disabled={isGrantingAccess}
+                      >
+                        <Ionicons name="add-outline" size={16} color="#34C759" />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.actionButton, { borderColor: theme.colors.warning || '#FF9500' }]}
+                        onPress={() => handleRevokeProjectsFromUser(member)}
+                        disabled={isRevokingAccess}
+                      >
+                        <Ionicons name="remove-outline" size={16} color={theme.colors.warning || '#FF9500'} />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.actionButton, { borderColor: theme.colors.danger }]}
+                        onPress={() => handleRevokeAccess(member)}
+                        disabled={removingUserId === member.id}
+                      >
+                        {removingUserId === member.id ? (
+                          <ActivityIndicator color={theme.colors.danger} size="small" />
+                        ) : (
+                          <Ionicons name="close-outline" size={16} color={theme.colors.danger} />
+                        )}
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 ))
               )}
@@ -597,6 +760,219 @@ export default function SettingsScreen() {
                 })
               )}
             </View>
+          </BottomSheetScrollView>
+        </View>
+      </BottomSheet>
+
+      <BottomSheet
+        visible={projectsBottomSheetVisible}
+        onClose={() => {
+          setProjectsBottomSheetVisible(false);
+          setSelectedUser(null);
+          setSelectedProjectIds(new Set());
+        }}
+        enablePanDownToClose={true}
+        enableBackdrop={true}
+        backdropOpacity={0.5}
+        snapPoints={bottomSheetSnapPoints}
+      >
+        <View style={styles.bottomSheetWrapper}>
+          <BottomSheetScrollView
+            keyboardShouldPersistTaps="handled"
+            style={{ maxHeight: bottomSheetContentMaxHeight }}
+            contentContainerStyle={[
+              styles.bottomSheetScrollContent,
+              { 
+                paddingBottom: insets.bottom + 24,
+              },
+            ]}
+            showsVerticalScrollIndicator={true}
+            bounces={false}
+          >
+            <Text style={[styles.bottomSheetTitle, { color: theme.colors.text }]}>
+              Виберіть проєкти для {selectedUser?.displayName || selectedUser?.email}
+            </Text>
+            <Text style={[styles.bottomSheetDescription, { color: theme.colors.textSecondary }]}>
+              Оберіть проєкти, до яких ви хочете надати доступ користувачу
+            </Text>
+
+            <View style={styles.projectsList}>
+              {projectsLoading ? (
+                <View style={styles.loadingSharedUsers}>
+                  <ActivityIndicator color={theme.colors.primary} />
+                  <Text style={[styles.loadingSharedUsersText, { color: theme.colors.textSecondary }]}>
+                    Завантаження...
+                  </Text>
+                </View>
+              ) : ownerProjects.length === 0 ? (
+                <Text style={[styles.emptySharedUsersText, { color: theme.colors.textSecondary }]}>
+                  У вас немає проєктів
+                </Text>
+              ) : (
+                ownerProjects.map((project) => {
+                  const isSelected = selectedProjectIds.has(project.id);
+                  const alreadyHasAccess = selectedUser && project.members?.includes(selectedUser.id);
+                  return (
+                    <TouchableOpacity
+                      key={project.id}
+                      style={[
+                        styles.projectSelectCard,
+                        { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+                        isSelected && { borderColor: theme.colors.primary, borderWidth: 2 },
+                        alreadyHasAccess && !isSelected && { opacity: 0.7 },
+                      ]}
+                      onPress={() => handleToggleProjectSelection(project.id)}
+                    >
+                      <View style={styles.projectSelectInfo}>
+                        <View style={styles.projectSelectNameRow}>
+                          <Text style={[styles.projectSelectName, { color: theme.colors.text }]}>
+                            {project.name}
+                          </Text>
+                          {alreadyHasAccess && (
+                            <Text style={[styles.alreadyHasAccessBadge, { color: theme.colors.textSecondary }]}>
+                              (вже має доступ)
+                            </Text>
+                          )}
+                        </View>
+                        {project.description && (
+                          <Text style={[styles.projectSelectDescription, { color: theme.colors.textSecondary }]}>
+                            {project.description}
+                          </Text>
+                        )}
+                      </View>
+                      {isSelected ? (
+                        <Ionicons name="checkmark-circle" size={24} color={theme.colors.primary} />
+                      ) : (
+                        <Ionicons name="ellipse-outline" size={24} color={theme.colors.textSecondary} />
+                      )}
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.confirmButton,
+                {
+                  backgroundColor: theme.colors.primary,
+                  opacity: selectedProjectIds.size === 0 || isGrantingAccess ? 0.5 : 1,
+                },
+              ]}
+              onPress={handleConfirmProjectSelection}
+              disabled={selectedProjectIds.size === 0 || isGrantingAccess}
+            >
+              {isGrantingAccess ? (
+                <ActivityIndicator color={theme.colors.primaryText} />
+              ) : (
+                <Text style={[styles.confirmButtonText, { color: theme.colors.primaryText }]}>
+                  Надати доступ ({selectedProjectIds.size})
+                </Text>
+              )}
+            </TouchableOpacity>
+          </BottomSheetScrollView>
+        </View>
+      </BottomSheet>
+
+      <BottomSheet
+        visible={revokeProjectsBottomSheetVisible}
+        onClose={() => {
+          setRevokeProjectsBottomSheetVisible(false);
+          setSelectedUser(null);
+          setSelectedProjectsToRevoke(new Set());
+        }}
+        enablePanDownToClose={true}
+        enableBackdrop={true}
+        backdropOpacity={0.5}
+        snapPoints={bottomSheetSnapPoints}
+      >
+        <View style={styles.bottomSheetWrapper}>
+          <BottomSheetScrollView
+            keyboardShouldPersistTaps="handled"
+            style={{ maxHeight: bottomSheetContentMaxHeight }}
+            contentContainerStyle={[
+              styles.bottomSheetScrollContent,
+              { 
+                paddingBottom: insets.bottom + 24,
+              },
+            ]}
+            showsVerticalScrollIndicator={true}
+            bounces={false}
+          >
+            <Text style={[styles.bottomSheetTitle, { color: theme.colors.text }]}>
+              Забрати доступ для {selectedUser?.displayName || selectedUser?.email}
+            </Text>
+            <Text style={[styles.bottomSheetDescription, { color: theme.colors.textSecondary }]}>
+              Оберіть проєкти, з яких ви хочете забрати доступ користувачу
+            </Text>
+
+            <View style={styles.projectsList}>
+              {projectsLoading ? (
+                <View style={styles.loadingSharedUsers}>
+                  <ActivityIndicator color={theme.colors.primary} />
+                  <Text style={[styles.loadingSharedUsersText, { color: theme.colors.textSecondary }]}>
+                    Завантаження...
+                  </Text>
+                </View>
+              ) : ownerProjects.length === 0 ? (
+                <Text style={[styles.emptySharedUsersText, { color: theme.colors.textSecondary }]}>
+                  У вас немає проєктів
+                </Text>
+              ) : (
+                ownerProjects
+                  .filter(project => project.members?.includes(selectedUser?.id || ''))
+                  .map((project) => {
+                    const isSelected = selectedProjectsToRevoke.has(project.id);
+                    return (
+                      <TouchableOpacity
+                        key={project.id}
+                        style={[
+                          styles.projectSelectCard,
+                          { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+                          isSelected && { borderColor: theme.colors.danger, borderWidth: 2 },
+                        ]}
+                        onPress={() => handleToggleRevokeProjectSelection(project.id)}
+                      >
+                        <View style={styles.projectSelectInfo}>
+                          <Text style={[styles.projectSelectName, { color: theme.colors.text }]}>
+                            {project.name}
+                          </Text>
+                          {project.description && (
+                            <Text style={[styles.projectSelectDescription, { color: theme.colors.textSecondary }]}>
+                              {project.description}
+                            </Text>
+                          )}
+                        </View>
+                        {isSelected ? (
+                          <Ionicons name="checkmark-circle" size={24} color={theme.colors.danger} />
+                        ) : (
+                          <Ionicons name="ellipse-outline" size={24} color={theme.colors.textSecondary} />
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })
+              )}
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.confirmButton,
+                {
+                  backgroundColor: theme.colors.danger,
+                  opacity: selectedProjectsToRevoke.size === 0 || isRevokingAccess ? 0.5 : 1,
+                },
+              ]}
+              onPress={handleConfirmRevokeProjects}
+              disabled={selectedProjectsToRevoke.size === 0 || isRevokingAccess}
+            >
+              {isRevokingAccess ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={[styles.confirmButtonText, { color: '#FFFFFF' }]}>
+                  Забрати доступ ({selectedProjectsToRevoke.size})
+                </Text>
+              )}
+            </TouchableOpacity>
           </BottomSheetScrollView>
         </View>
       </BottomSheet>
@@ -736,16 +1112,60 @@ const createStyles = (colors: any) =>
     sharedUserEmail: {
       fontSize: 14,
     },
-    revokeButton: {
+    sharedUserActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    actionButton: {
       borderWidth: 1,
       borderRadius: 8,
-      paddingVertical: 8,
-      paddingHorizontal: 14,
+      width: 36,
+      height: 36,
       alignItems: 'center',
       justifyContent: 'center',
     },
+    addProjectsButton: {
+      borderWidth: 1,
+      borderRadius: 6,
+      paddingVertical: 6,
+      paddingHorizontal: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexDirection: 'row',
+      gap: 4,
+      minWidth: 80,
+    },
+    addProjectsButtonText: {
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    revokeProjectsButton: {
+      borderWidth: 1,
+      borderRadius: 6,
+      paddingVertical: 6,
+      paddingHorizontal: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexDirection: 'row',
+      gap: 4,
+      minWidth: 80,
+    },
+    revokeProjectsButtonText: {
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    revokeButton: {
+      borderWidth: 1,
+      borderRadius: 6,
+      paddingVertical: 6,
+      paddingHorizontal: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+      minWidth: 80,
+    },
     revokeButtonText: {
-      fontSize: 14,
+      fontSize: 12,
       fontWeight: '600',
     },
     loadingSharedUsers: {
@@ -913,6 +1333,52 @@ const createStyles = (colors: any) =>
       fontSize: 14,
       marginBottom: 20,
       lineHeight: 20,
+    },
+    projectsList: {
+      marginBottom: 24,
+    },
+    projectSelectCard: {
+      borderWidth: 1,
+      borderRadius: 12,
+      padding: 16,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 12,
+    },
+    projectSelectInfo: {
+      flex: 1,
+      marginRight: 12,
+    },
+    projectSelectNameRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      marginBottom: 4,
+    },
+    projectSelectName: {
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    alreadyHasAccessBadge: {
+      fontSize: 12,
+      fontStyle: 'italic',
+      marginLeft: 8,
+    },
+    projectSelectDescription: {
+      fontSize: 14,
+    },
+    confirmButton: {
+      borderRadius: 12,
+      paddingVertical: 16,
+      paddingHorizontal: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 8,
+    },
+    confirmButtonText: {
+      fontSize: 16,
+      fontWeight: '600',
     },
   });
 
