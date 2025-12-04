@@ -4,6 +4,10 @@ import { User as FirebaseUser } from 'firebase/auth';
 import { onAuthStateChange, convertToAuthUser, getUserData, getCurrentUser } from '../services/auth';
 import { AuthUser, User } from '../types';
 import { saveEmail, removeEmail } from '../utils/secureStorage';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../config/firebase';
+
+const USERS_COLLECTION = 'users';
 
 const AUTH_STORAGE_KEY = '@remonto:authUser';
 
@@ -126,6 +130,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       unsubscribe();
     };
   }, []);
+
+  // Підписуємось на зміни документа користувача для автоматичного оновлення userData
+  useEffect(() => {
+    if (!user) {
+      setUserData(null);
+      return;
+    }
+
+    const userDocRef = doc(db, USERS_COLLECTION, user.uid);
+    const unsubscribeUserData = onSnapshot(
+      userDocRef,
+      (docSnapshot) => {
+        if (docSnapshot.exists()) {
+          const data = { id: docSnapshot.id, ...docSnapshot.data() } as User;
+          setUserData(data);
+        } else {
+          setUserData(null);
+        }
+      },
+      (error) => {
+        console.error('Помилка підписки на зміни користувача:', error);
+        // У разі помилки завантажуємо дані вручну
+        refreshUserData();
+      }
+    );
+
+    return () => {
+      unsubscribeUserData();
+    };
+  }, [user]);
 
   const authUser = convertToAuthUser(user);
 

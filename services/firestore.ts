@@ -124,19 +124,20 @@ const removeMemberFromOwnerProjects = async (ownerId: string, memberId: string):
       return;
     }
 
-    const batch = writeBatch(db);
-    let hasUpdates = false;
-
-    ownerProjectsSnapshot.forEach((projectDoc) => {
-      batch.update(projectDoc.ref, {
-        members: arrayRemove(memberId),
-      });
-      hasUpdates = true;
+    // Оновлюємо проекти по одному, щоб перевірка доступу працювала правильно
+    const updatePromises = ownerProjectsSnapshot.docs.map(async (projectDoc) => {
+      const projectData = projectDoc.data();
+      const members = projectData.members || [];
+      
+      // Перевіряємо, чи користувач дійсно є членом проекту
+      if (members.includes(memberId)) {
+        await updateDoc(projectDoc.ref, {
+          members: arrayRemove(memberId),
+        });
+      }
     });
 
-    if (hasUpdates) {
-      await batch.commit();
-    }
+    await Promise.all(updatePromises);
   } catch (error) {
     console.error('Помилка видалення учасника з проєктів:', error);
     throw error;
@@ -248,6 +249,31 @@ export async function revokeProjectAccess(ownerId: string, memberId: string): Pr
 }
 
 /**
+ * Відписатися від користувача (видалити себе з sharedUsers власника та з members всіх його проектів)
+ */
+export async function leaveUserAccess(ownerId: string, memberId: string): Promise<void> {
+  const ownerRef = doc(db, USERS_COLLECTION, ownerId);
+  const ownerDoc = await getDoc(ownerRef);
+
+  if (!ownerDoc.exists()) {
+    throw new Error('Профіль власника не знайдено');
+  }
+
+  const ownerData = ownerDoc.data() as User;
+  const existingShared = ownerData.sharedUsers ?? [];
+
+  // Видаляємо себе зі списку sharedUsers власника
+  if (existingShared.includes(memberId)) {
+    await updateDoc(ownerRef, {
+      sharedUsers: arrayRemove(memberId),
+    });
+  }
+
+  // Видаляємо себе з members всіх проектів власника
+  await removeMemberFromOwnerProjects(ownerId, memberId);
+}
+
+/**
  * Отримати проекти власника
  */
 export async function getOwnerProjects(ownerId: string): Promise<Project[]> {
@@ -354,6 +380,13 @@ export async function revokeProjectAccessFromSelectedProjects(
     throw new Error('Виберіть хоча б один проєкт');
   }
 
+  // Спочатку перевіряємо, скільки проектів має користувач ДО забору доступу
+  const ownerProjectsBefore = await getOwnerProjects(ownerId);
+  const projectsWithAccessBefore = ownerProjectsBefore.filter(project => 
+    project.members?.includes(memberId)
+  );
+  const totalProjectsWithAccess = projectsWithAccessBefore.length;
+
   // Видаляємо користувача з вибраних проектів
   const batch = writeBatch(db);
   let hasUpdates = false;
@@ -370,18 +403,30 @@ export async function revokeProjectAccessFromSelectedProjects(
     await batch.commit();
   }
 
-  // Перевіряємо, чи користувач має доступ до інших проектів власника
-  const ownerProjects = await getOwnerProjects(ownerId);
-  const hasAccessToAnyProject = ownerProjects.some(project => 
-    project.members?.includes(memberId)
-  );
-
-  // Якщо користувач не має доступу до жодного проекту, видаляємо його з sharedUsers
-  if (!hasAccessToAnyProject) {
+  // Якщо кількість проектів, з яких забирається доступ, дорівнює загальній кількості проектів з доступом,
+  // то користувач більше не має доступу до жодного проекту - видаляємо його з sharedUsers одразу
+  if (projectIds.length >= totalProjectsWithAccess && totalProjectsWithAccess > 0) {
     const ownerRef = doc(db, USERS_COLLECTION, ownerId);
     await updateDoc(ownerRef, {
       sharedUsers: arrayRemove(memberId),
     });
+  } else if (projectIds.length < totalProjectsWithAccess) {
+    // Якщо забирається доступ не з усіх проектів, перевіряємо після затримки
+    // для забезпечення консистентності даних після batch операції
+    // Збільшуємо затримку до 500мс для надійності
+    await new Promise(resolve => setTimeout(resolve, 500));
+    const ownerProjectsAfter = await getOwnerProjects(ownerId);
+    const hasAccessToAnyProject = ownerProjectsAfter.some(project => 
+      project.members?.includes(memberId)
+    );
+
+    // Якщо користувач не має доступу до жодного проекту, видаляємо його з sharedUsers
+    if (!hasAccessToAnyProject) {
+      const ownerRef = doc(db, USERS_COLLECTION, ownerId);
+      await updateDoc(ownerRef, {
+        sharedUsers: arrayRemove(memberId),
+      });
+    }
   }
 }
 
@@ -494,7 +539,7 @@ export async function deleteProject(projectId: string, userId: string): Promise<
 
     // Спочатку видаляємо всі витрати, поки проєкт ще існує (правила безпеки дозволяють доступ)
     if (expenses.length > 0) {
-      const deleteExpensePromises = expenses.map((expense) => deleteExpense(expense.id));
+      const deleteExpensePromises = expenses.map((expense) => deleteExpense(expense.id, userId));
       await Promise.all(deleteExpensePromises);
     }
 
@@ -502,6 +547,38 @@ export async function deleteProject(projectId: string, userId: string): Promise<
     await deleteDoc(doc(db, PROJECTS_COLLECTION, projectId));
   } catch (error) {
     console.error('Помилка видалення проєкту:', error);
+    throw error;
+  }
+}
+
+/**
+ * Відписатися від проєкту (видалити себе з members)
+ */
+export async function leaveProject(projectId: string, userId: string): Promise<void> {
+  try {
+    // Перевіряємо, чи користувач є членом проєкту
+    const project = await getProject(projectId);
+    if (!project) {
+      throw new Error('Проєкт не знайдено');
+    }
+
+    // Не можна відписатися від власного проєкту
+    if (project.createdBy === userId) {
+      throw new Error('Ви не можете відписатися від власного проєкту');
+    }
+
+    // Перевіряємо, чи користувач є членом проєкту
+    const isMember = project.members?.includes(userId) || false;
+    if (!isMember) {
+      throw new Error('Ви не є членом цього проєкту');
+    }
+
+    // Видаляємо користувача з members
+    await updateDoc(doc(db, PROJECTS_COLLECTION, projectId), {
+      members: arrayRemove(userId),
+    });
+  } catch (error) {
+    console.error('Помилка відписки від проєкту:', error);
     throw error;
   }
 }
@@ -668,8 +745,28 @@ export async function updateExpense(expenseId: string, formData: ExpenseFormData
 /**
  * Видалити витрату
  */
-export async function deleteExpense(expenseId: string): Promise<void> {
+export async function deleteExpense(expenseId: string, userId: string): Promise<void> {
   try {
+    // Отримуємо витрату для перевірки доступу до проекту
+    const expense = await getExpense(expenseId);
+    if (!expense) {
+      throw new Error('Витрату не знайдено');
+    }
+
+    // Отримуємо проект для перевірки доступу
+    const project = await getProject(expense.projectId);
+    if (!project) {
+      throw new Error('Проєкт не знайдено');
+    }
+
+    // Перевіряємо, чи користувач має доступ до проекту (власник або член)
+    const isOwner = project.createdBy === userId;
+    const isMember = project.members?.includes(userId) || false;
+
+    if (!isOwner && !isMember) {
+      throw new Error('Ви не маєте прав на видалення витрат цього проєкту');
+    }
+
     await deleteDoc(doc(db, EXPENSES_COLLECTION, expenseId));
   } catch (error) {
     console.error('Помилка видалення витрати:', error);

@@ -330,10 +330,15 @@ export default function ExpensesScreen() {
     if (!confirmed) return;
 
     try {
-      await deleteExpense(expense.id);
+      if (!user) {
+        showErrorToast('Користувач не авторизований');
+        return;
+      }
+      await deleteExpense(expense.id, user.uid);
       showSuccessToast('Категорію успішно видалено');
-    } catch (error) {
-      showErrorToast('Не вдалося видалити категорію');
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Не вдалося видалити категорію';
+      showErrorToast(errorMessage);
     }
   };
 

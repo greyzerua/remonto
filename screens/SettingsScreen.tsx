@@ -23,7 +23,13 @@ import {
   getOwnerProjects,
   grantProjectAccessToSelectedProjects,
   revokeProjectAccessFromSelectedProjects,
+  subscribeToProjects,
+  leaveUserAccess,
 } from '../services/firestore';
+import { writeBatch, doc, arrayRemove } from 'firebase/firestore';
+import { db } from '../config/firebase';
+
+const PROJECTS_COLLECTION = 'projects';
 import { formatDateShort } from '../utils/helpers';
 import { removeEmail } from '../utils/secureStorage';
 import { showErrorToast, showSuccessToast, showWarningToast } from '../utils/toast';
@@ -61,6 +67,9 @@ export default function SettingsScreen() {
   const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(new Set());
   const [selectedProjectsToRevoke, setSelectedProjectsToRevoke] = useState<Set<string>>(new Set());
   const [isRevokingAccess, setIsRevokingAccess] = useState(false);
+  const [sharedProjects, setSharedProjects] = useState<Project[]>([]);
+  const [usersWhoGrantedAccess, setUsersWhoGrantedAccess] = useState<User[]>([]);
+  const [leavingUserId, setLeavingUserId] = useState<string | null>(null);
   const bottomSheetSnapPoints = useMemo(
     () => [Platform.OS === 'ios' ? 0.85 : 0.9],
     []
@@ -168,6 +177,90 @@ export default function SettingsScreen() {
       isMounted = false;
     };
   }, [userData?.sharedUsers]);
+
+  // Завантажуємо спільні проекти та знаходимо користувачів, які надали доступ
+  useEffect(() => {
+    if (!user) return;
+
+    const unsubscribe = subscribeToProjects(user.uid, async (updatedProjects) => {
+      // Фільтруємо тільки спільні проекти (ті, що не створені поточним користувачем)
+      // І тільки ті, де користувач дійсно є членом
+      const shared = updatedProjects.filter(p => 
+        p.createdBy !== user.uid && 
+        p.members?.includes(user.uid)
+      );
+      setSharedProjects(shared);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Додаткова перевірка: якщо проекти зникли, одразу оновлюємо список користувачів
+  // Це допомагає одразу оновити список, коли власник забирає доступ з усіх проектів
+  // Використовуємо useMemo для обчислення списку власників на основі sharedProjects
+  const computedUsersWhoGrantedAccess = useMemo(() => {
+    if (!user || sharedProjects.length === 0) {
+      return [];
+    }
+
+    // Знаходимо унікальних власників проектів
+    const ownerIds = new Set<string>();
+    sharedProjects.forEach(project => {
+      if (project.members?.includes(user.uid)) {
+        ownerIds.add(project.createdBy);
+      }
+    });
+
+    return Array.from(ownerIds);
+  }, [sharedProjects, user?.uid]);
+
+  // Оновлюємо список користувачів на основі обчислених власників
+  useEffect(() => {
+    if (computedUsersWhoGrantedAccess.length === 0) {
+      setUsersWhoGrantedAccess([]);
+      return;
+    }
+
+    // Завантажуємо дані користувачів для обчислених власників
+    getUsersByIds(computedUsersWhoGrantedAccess).then(owners => {
+      setUsersWhoGrantedAccess(owners);
+    });
+  }, [computedUsersWhoGrantedAccess]);
+
+  // Функція для відписки від користувача (видалити себе з members всіх його проектів)
+  const handleLeaveUser = async (ownerUser: User) => {
+    if (!user) {
+      showErrorToast('Помилка авторизації');
+      return;
+    }
+
+    const confirmed = await showConfirm({
+      title: 'Відписатися від користувача',
+      message: `Ви впевнені, що хочете відписатися від користувача "${ownerUser.displayName || ownerUser.email}"? Ви втратите доступ до всіх його проєктів.`,
+      confirmText: 'Відписатися',
+      cancelText: 'Скасувати',
+      type: 'danger',
+    });
+
+    if (!confirmed) return;
+
+    setLeavingUserId(ownerUser.id);
+    try {
+      // Видаляємо себе зі списку sharedUsers власника та з members всіх його проектів
+      await leaveUserAccess(ownerUser.id, user.uid);
+      
+      // Одразу оновлюємо список користувачів, видаляючи відписаного користувача
+      setUsersWhoGrantedAccess(prev => prev.filter(u => u.id !== ownerUser.id));
+      setSharedProjects(prev => prev.filter(p => p.createdBy !== ownerUser.id));
+      
+      showSuccessToast('Ви успішно відписалися від користувача');
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Не вдалося відписатися від користувача';
+      showErrorToast(errorMessage);
+    } finally {
+      setLeavingUserId(null);
+    }
+  };
 
   const handleGrantAccess = async () => {
     if (!user) {
@@ -643,6 +736,55 @@ export default function SettingsScreen() {
             </View>
           </View>
 
+          <View style={[styles.section, { borderBottomColor: theme.colors.border }]}>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Користувачі, які надали мені доступ</Text>
+            <Text style={[styles.sectionDescription, { color: theme.colors.textSecondary }]}>
+              Користувачі, які надали вам доступ до своїх проєктів. Ви можете відписатися від них у будь-який час і втратите доступ до всіх їх проєктів.
+            </Text>
+
+            <View style={styles.sharedUsersList}>
+              {usersWhoGrantedAccess.length === 0 ? (
+                <Text style={[styles.emptySharedUsersText, { color: theme.colors.textSecondary }]}>
+                  Вам ще не надали доступ жодні користувачі
+                </Text>
+              ) : (
+                usersWhoGrantedAccess.map((ownerUser) => {
+                  const projectsCount = sharedProjects.filter(p => p.createdBy === ownerUser.id).length;
+                  
+                  return (
+                    <View
+                      key={ownerUser.id}
+                      style={[
+                        styles.sharedUserCard,
+                        { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+                      ]}
+                    >
+                      <View style={styles.sharedUserInfo}>
+                        <Text style={[styles.sharedUserName, { color: theme.colors.text }]}>
+                          {ownerUser.displayName || ownerUser.email}
+                        </Text>
+                        <Text style={[styles.sharedUserEmail, { color: theme.colors.textSecondary }]}>
+                          {ownerUser.email}
+                          {projectsCount > 0 && ` • ${projectsCount} проєкт${projectsCount === 1 ? '' : projectsCount < 5 ? 'и' : 'ів'}`}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.actionButton, { borderColor: theme.colors.danger }]}
+                        onPress={() => handleLeaveUser(ownerUser)}
+                        disabled={leavingUserId === ownerUser.id}
+                      >
+                        {leavingUserId === ownerUser.id ? (
+                          <ActivityIndicator color={theme.colors.danger} size="small" />
+                        ) : (
+                          <Ionicons name="close-outline" size={16} color={theme.colors.danger} />
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })
+              )}
+            </View>
+          </View>
 
           <View style={[styles.section, styles.footerSection]}>
             <TouchableOpacity
