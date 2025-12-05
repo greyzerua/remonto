@@ -591,7 +591,7 @@ const createStyles = (colors: any) =>
       gap: 12,
     },
     logo: {
-      width: 270,
+      width: 240,
       height: 44,
     },
     themeToggleButton: {
@@ -601,7 +601,7 @@ const createStyles = (colors: any) =>
       justifyContent: 'center',
     },
     themeToggleIcon: {
-      fontSize: 30,
+      fontSize: 27,
     },
     loadingContainer: {
       flex: 1,
