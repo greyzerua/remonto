@@ -11,9 +11,17 @@ service cloud.firestore {
       // Дозволити оновлення власнику або користувачу, який є в sharedUsers
       // Це дозволяє користувачу видалити себе зі списку sharedUsers
       // АБО власнику видалити іншого користувача зі свого sharedUsers
+      // Також дозволяємо оновлювати FCM токен та налаштування нотифікацій
       allow update: if request.auth != null && (
         request.auth.uid == userId ||
-        request.auth.uid in resource.data.get('sharedUsers', [])
+        (request.auth.uid in resource.data.get('sharedUsers', []) &&
+         // Дозволяємо sharedUsers оновлювати FCM токен та налаштування нотифікацій
+         (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['fcmToken', 'notificationsEnabled', 'tokenUpdatedAt']) ||
+          // АБО дозволяємо видалити себе зі списку sharedUsers
+          // Перевіряємо: користувач був в старому списку, немає в новому, і змінюється тільки sharedUsers
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sharedUsers']) &&
+           request.auth.uid in resource.data.get('sharedUsers', []) &&
+           !(request.auth.uid in request.resource.data.get('sharedUsers', [])))))
       );
       
       allow create, delete: if request.auth != null && request.auth.uid == userId;

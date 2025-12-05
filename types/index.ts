@@ -7,6 +7,9 @@ export interface User {
   photoURL?: string;
   createdAt: string;
   sharedUsers?: string[];
+  fcmToken?: string; // FCM токен для push-нотифікацій
+  notificationsEnabled?: boolean; // Чи увімкнені нотифікації
+  tokenUpdatedAt?: string; // Дата останнього оновлення токену
 }
 
 // Типи для проєктів ремонту

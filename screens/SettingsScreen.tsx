@@ -38,6 +38,13 @@ import ClearableTextInput from '../components/ClearableTextInput';
 import { User, Project } from '../types';
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '../components/BottomSheet';
+import { 
+  getFCMToken, 
+  saveFCMTokenToFirestore, 
+  removeFCMTokenFromFirestore,
+  getNotificationPermissionsStatus,
+  requestNotificationPermissions 
+} from '../services/fcmNotifications';
 
 export default function SettingsScreen() {
   const { user, authUser, userData, refreshUserData, setRevokingAccessUserId } = useAuth();
@@ -70,6 +77,8 @@ export default function SettingsScreen() {
   const [sharedProjects, setSharedProjects] = useState<Project[]>([]);
   const [usersWhoGrantedAccess, setUsersWhoGrantedAccess] = useState<User[]>([]);
   const [leavingUserId, setLeavingUserId] = useState<string | null>(null);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
   const bottomSheetSnapPoints = useMemo(
     () => [Platform.OS === 'ios' ? 0.85 : 0.9],
     []
@@ -101,6 +110,23 @@ export default function SettingsScreen() {
     const currentName = userData?.displayName || authUser?.displayName || '';
     setDisplayName(currentName);
   }, [userData?.displayName, authUser?.displayName]);
+
+  // Перевірка статусу нотифікацій
+  useEffect(() => {
+    const checkNotificationStatus = async () => {
+      if (!user) return;
+      
+      try {
+        const status = await getNotificationPermissionsStatus();
+        const isEnabled = status.granted && (userData?.notificationsEnabled ?? false);
+        setNotificationsEnabled(isEnabled);
+      } catch (error) {
+        console.error('Помилка перевірки статусу нотифікацій:', error);
+      }
+    };
+
+    checkNotificationStatus();
+  }, [user, userData?.notificationsEnabled]);
 
   useEffect(() => {
     let isMounted = true;
@@ -540,6 +566,41 @@ export default function SettingsScreen() {
     setNameError('');
   };
 
+  const toggleNotifications = async () => {
+    if (!user) return;
+
+    setNotificationsLoading(true);
+    try {
+      if (notificationsEnabled) {
+        // Вимкнути нотифікації
+        await removeFCMTokenFromFirestore(user.uid);
+        setNotificationsEnabled(false);
+        showSuccessToast('Нотифікації вимкнено');
+      } else {
+        // Увімкнути нотифікації
+        const hasPermission = await requestNotificationPermissions();
+        if (hasPermission) {
+          const token = await getFCMToken();
+          if (token) {
+            await saveFCMTokenToFirestore(user.uid, token);
+            setNotificationsEnabled(true);
+            await refreshUserData();
+            showSuccessToast('Нотифікації увімкнено');
+          } else {
+            showErrorToast('Не вдалося отримати токен нотифікацій');
+          }
+        } else {
+          showWarningToast('Дозвіл на нотифікації не надано');
+        }
+      }
+    } catch (error: any) {
+      console.error('Помилка перемикання нотифікацій:', error);
+      showErrorToast(error?.message || 'Не вдалося змінити налаштування');
+    } finally {
+      setNotificationsLoading(false);
+    }
+  };
+
   const handleLogout = async () => {
     const confirmed = await showConfirm({
       title: 'Вихід',
@@ -665,6 +726,45 @@ export default function SettingsScreen() {
                 )}
               </View>
             </View>
+          </View>
+
+          <View style={[styles.section, { borderBottomColor: theme.colors.border }]}>
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Нотифікації</Text>
+            <Text style={[styles.sectionDescription, { color: theme.colors.textSecondary }]}>
+              Отримуйте сповіщення про події в проєктах та доступ від інших користувачів
+            </Text>
+
+            <TouchableOpacity
+              style={[
+                styles.notificationToggle,
+                {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                },
+              ]}
+              onPress={toggleNotifications}
+              disabled={notificationsLoading}
+            >
+              <View style={styles.notificationToggleInfo}>
+                <Text style={[styles.notificationToggleTitle, { color: theme.colors.text }]}>
+                  Push-нотифікації
+                </Text>
+                <Text style={[styles.notificationToggleDescription, { color: theme.colors.textSecondary }]}>
+                  {notificationsEnabled 
+                    ? 'Ви отримуєте сповіщення про події' 
+                    : 'Увімкніть для отримання сповіщень'}
+                </Text>
+              </View>
+              {notificationsLoading ? (
+                <ActivityIndicator color={theme.colors.primary} size="small" />
+              ) : (
+                <Ionicons
+                  name={notificationsEnabled ? 'notifications' : 'notifications-off-outline'}
+                  size={24}
+                  color={notificationsEnabled ? theme.colors.primary : theme.colors.textSecondary}
+                />
+              )}
+            </TouchableOpacity>
           </View>
 
           <View style={[styles.section, { borderBottomColor: theme.colors.border }]}>
@@ -1535,6 +1635,27 @@ const createStyles = (colors: any) =>
     confirmButtonText: {
       fontSize: 16,
       fontWeight: '600',
+    },
+    notificationToggle: {
+      borderWidth: 1,
+      borderRadius: 12,
+      padding: 16,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginTop: 12,
+    },
+    notificationToggleInfo: {
+      flex: 1,
+      marginRight: 12,
+    },
+    notificationToggleTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      marginBottom: 4,
+    },
+    notificationToggleDescription: {
+      fontSize: 14,
     },
   });
 

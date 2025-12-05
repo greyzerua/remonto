@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react';
+import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User as FirebaseUser } from 'firebase/auth';
 import { onAuthStateChange, convertToAuthUser, getUserData, getCurrentUser } from '../services/auth';
@@ -8,6 +9,8 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { getUsersByIds } from '../services/firestore';
 import { showWarningToast, showSuccessToast } from '../utils/toast';
+import { getFCMToken, saveFCMTokenToFirestore } from '../services/fcmNotifications';
+import * as Notifications from 'expo-notifications';
 
 const USERS_COLLECTION = 'users';
 
@@ -48,8 +51,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Firebase Auth автоматично зберігає токени і відновлює сесію
     const handleAuthState = async (firebaseUser: FirebaseUser | null) => {
       if (!isMounted) return;
-      
-      console.log('handleAuthState викликано:', firebaseUser ? firebaseUser.uid : 'null');
       
       setUser(firebaseUser);
       
@@ -93,7 +94,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       const currentUser = getCurrentUser();
       if (currentUser && isMounted && !authStateHandled) {
-        console.log('Знайдено користувача при ініціалізації:', currentUser.uid);
         await handleAuthState(currentUser);
       }
     };
@@ -116,14 +116,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       if (!isMounted || authStateHandled) return;
       
-      console.log('Додаткова перевірка через 1 секунду');
       const currentUser = getCurrentUser();
       
       if (currentUser && isMounted) {
-        console.log('Знайдено користувача при додатковій перевірці:', currentUser.uid);
         await handleAuthState(currentUser);
       } else if (isMounted) {
-        console.log('Користувача не знайдено при додатковій перевірці');
         setLoading(false);
       }
     };
@@ -207,17 +204,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       id => !currentSharedUserIds.includes(id) && !revokingAccessUserIdsRef.current.has(id)
     );
 
-    // Показуємо тост для кожного користувача, який надав доступ
+    // Показуємо тост та відправляємо нотифікацію для кожного користувача, який надав доступ
     if (subscribedUserIds.length > 0) {
       subscribedUserIds.forEach(async (subscribedUserId) => {
         try {
           const subscribedUsers = await getUsersByIds([subscribedUserId]);
           if (subscribedUsers.length > 0) {
             const subscribedUser = subscribedUsers[0];
-            showSuccessToast(
-              `${subscribedUser.displayName || subscribedUser.email} надав вам доступ до своїх проєктів`,
-              'Доступ надано'
-            );
+            const message = `${subscribedUser.displayName || subscribedUser.email} надав вам доступ до своїх проєктів`;
+            
+            // Показуємо Toast (Cloud Functions автоматично відправлять push-нотифікацію)
+            showSuccessToast(message, 'Доступ надано');
           }
         } catch (error) {
           console.error('Помилка отримання інформації про користувача:', error);
@@ -225,17 +222,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
     }
 
-    // Показуємо тост для кожного користувача, який відписався
+    // Показуємо тост та відправляємо нотифікацію для кожного користувача, який відписався
     if (unsubscribedUserIds.length > 0) {
       unsubscribedUserIds.forEach(async (unsubscribedUserId) => {
         try {
           const unsubscribedUsers = await getUsersByIds([unsubscribedUserId]);
           if (unsubscribedUsers.length > 0) {
             const unsubscribedUser = unsubscribedUsers[0];
-            showWarningToast(
-              `${unsubscribedUser.displayName || unsubscribedUser.email} відписався від вас`,
-              'Відписка'
-            );
+            const message = `${unsubscribedUser.displayName || unsubscribedUser.email} відписався від вас`;
+            
+            // Показуємо Toast
+            showWarningToast(message, 'Відписка');
           }
         } catch (error) {
           console.error('Помилка отримання інформації про користувача:', error);
@@ -254,6 +251,80 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }, 1000);
     }
   }, [userData?.sharedUsers]);
+
+  // Реєстрація FCM токену при авторизації користувача
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    let isMounted = true;
+
+    const registerFCMToken = async () => {
+      try {
+        const token = await getFCMToken();
+        if (token && isMounted) {
+          await saveFCMTokenToFirestore(user.uid, token);
+        }
+      } catch (error) {
+        console.error('Помилка реєстрації FCM token:', error);
+      }
+    };
+
+    registerFCMToken();
+
+    // Слухаємо зміни токену (наприклад, при оновленні)
+    const tokenListener = Notifications.addPushTokenListener(async (tokenData) => {
+      if (isMounted && user) {
+        try {
+          await saveFCMTokenToFirestore(user.uid, tokenData.data);
+        } catch (error) {
+          console.error('Помилка оновлення FCM token:', error);
+        }
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      tokenListener.remove();
+    };
+  }, [user]);
+
+  // Обробка вхідних нотифікацій
+  useEffect(() => {
+    if (!user) return;
+
+    // Обробка нотифікацій, коли додаток на передньому плані
+    const notificationListener = Notifications.addNotificationReceivedListener(async (notification) => {
+      const appState = AppState.currentState;
+      
+      // Якщо додаток на передньому плані, негайно приховуємо нотифікацію програмно
+      if (appState === 'active') {
+        try {
+          // Приховуємо конкретну нотифікацію
+          await Notifications.dismissNotificationAsync(notification.request.identifier);
+        } catch (error) {
+          // Якщо не вдалося приховати конкретну, спробуємо приховати всі
+          try {
+            await Notifications.dismissAllNotificationsAsync();
+          } catch (dismissAllError) {
+            // Ігноруємо помилки приховування
+          }
+        }
+      }
+    });
+
+    // Обробка натискання на нотифікацію
+    const responseListener = Notifications.addNotificationResponseReceivedListener(response => {
+      const data = response.notification.request.content.data;
+      // Навігація до потрібного екрану може бути додана тут
+    });
+
+    return () => {
+      notificationListener.remove();
+      responseListener.remove();
+    };
+  }, [user]);
 
   const authUser = convertToAuthUser(user);
 

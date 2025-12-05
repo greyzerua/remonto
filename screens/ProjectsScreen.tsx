@@ -119,10 +119,10 @@ export default function ProjectsScreen() {
             projectWord = 'проєктів';
           }
           
-          showSuccessToast(
-            `Вам надали доступ до ${projectsCount} ${projectWord}`,
-            'Новий доступ'
-          );
+          const message = `Вам надали доступ до ${projectsCount} ${projectWord}`;
+          
+          // Показуємо Toast (Cloud Functions автоматично відправлять push-нотифікацію)
+          showSuccessToast(message, 'Новий доступ');
         }
 
         // Знаходимо проєкти, з яких забрали доступ (ті, що були в попередньому списку, але відсутні в поточному)
@@ -153,10 +153,10 @@ export default function ProjectsScreen() {
             projectWord = 'проєктів';
           }
           
-          showWarningToast(
-            `У вас забрали доступ до ${projectsCount} ${projectWord}`,
-            'Доступ скасовано'
-          );
+          const message = `У вас забрали доступ до ${projectsCount} ${projectWord}`;
+          
+          // Показуємо Toast
+          showWarningToast(message, 'Доступ скасовано');
         }
       }
 
