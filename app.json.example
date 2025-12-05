@@ -1,0 +1,66 @@
+{
+  "expo": {
+    "name": "Remonto",
+    "slug": "Remonto",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/Splash-logo.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/transparent-logo.png",
+      "resizeMode": "cover"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/transparent-logo.png"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "useNextNotificationsApi": true,
+      "package": "com.remonto",
+      "googleServicesFile": "./google-services.json"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "remote-notification"
+        ]
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#1F2C3D",
+          "sounds": []
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "googleServicesFile": "./google-services.json"
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "firebase": {
+        "apiKey": "YOUR_FIREBASE_API_KEY",
+        "authDomain": "YOUR_PROJECT_ID.firebaseapp.com",
+        "projectId": "YOUR_PROJECT_ID",
+        "storageBucket": "YOUR_PROJECT_ID.firebasestorage.app",
+        "messagingSenderId": "YOUR_MESSAGING_SENDER_ID",
+        "appId": "YOUR_APP_ID"
+      }
+    }
+  }
+}
+
