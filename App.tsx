@@ -30,7 +30,7 @@ function MainNavigator() {
         edges={['top', 'bottom']}
       >
         <Image
-          source={require('./assets/Splash-logo.png')}
+          source={require('./assets/transparent-logo.png')}
           style={styles.splashLogo}
           resizeMode="contain"
         />
