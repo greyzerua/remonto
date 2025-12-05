@@ -43,7 +43,6 @@ yarn-error.*
 
 # Firebase secrets
 google-services.json
+app.json
 .firebaserc
 firebase.json
-# Note: app.json is kept in repo but with empty placeholder values
-# Fill in your Firebase credentials locally
