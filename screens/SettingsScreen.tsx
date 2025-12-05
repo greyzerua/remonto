@@ -40,7 +40,7 @@ import { Ionicons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '../components/BottomSheet';
 
 export default function SettingsScreen() {
-  const { user, authUser, userData, refreshUserData } = useAuth();
+  const { user, authUser, userData, refreshUserData, setRevokingAccessUserId } = useAuth();
   const { theme } = useTheme();
   const { showConfirm } = useConfirmDialog();
   const insets = useSafeAreaInsets();
@@ -370,6 +370,8 @@ export default function SettingsScreen() {
     const projectsCount = selectedProjectsToRevoke.size;
     setIsRevokingAccess(true);
     try {
+      // Вказуємо, що зараз забираємо доступ, щоб не показувати тост про відписку
+      setRevokingAccessUserId(selectedUser.id);
       await revokeProjectAccessFromSelectedProjects(
         user.uid,
         selectedUser.id,
@@ -385,6 +387,8 @@ export default function SettingsScreen() {
     } catch (error: any) {
       const message = error?.message || 'Не вдалося забрати доступ. Спробуйте ще раз.';
       showErrorToast(message);
+      // Очищаємо ref у випадку помилки
+      setRevokingAccessUserId(null);
     } finally {
       setIsRevokingAccess(false);
     }
@@ -481,6 +485,8 @@ export default function SettingsScreen() {
 
     setRemovingUserId(member.id);
     try {
+      // Вказуємо, що зараз забираємо доступ, щоб не показувати тост про відписку
+      setRevokingAccessUserId(member.id);
       await revokeProjectAccess(user.uid, member.id);
       await refreshUserData();
       showSuccessToast(
@@ -490,6 +496,8 @@ export default function SettingsScreen() {
     } catch (error: any) {
       const message = error?.message || 'Не вдалося скасувати доступ. Спробуйте ще раз.';
       showErrorToast(message);
+      // Очищаємо ref у випадку помилки
+      setRevokingAccessUserId(null);
     } finally {
       setRemovingUserId(null);
     }
@@ -563,7 +571,15 @@ export default function SettingsScreen() {
         <View style={styles.contentInner}>
           <View style={styles.contentBody}>
             <View style={[styles.header]}>
+              <View style={styles.headerSpacer} />
               <Text style={[styles.title, { color: theme.colors.text }]}>Профіль</Text>
+              <TouchableOpacity
+                style={styles.logoutButton}
+                onPress={handleLogout}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="log-out-outline" size={27} color={theme.colors.danger} />
+              </TouchableOpacity>
             </View>
 
             <View style={[styles.section, { borderBottomColor: theme.colors.border }]}>
@@ -712,11 +728,11 @@ export default function SettingsScreen() {
                         <Ionicons name="add-outline" size={16} color="#34C759" />
                       </TouchableOpacity>
                       <TouchableOpacity
-                        style={[styles.actionButton, { borderColor: theme.colors.warning || '#FF9500' }]}
+                        style={[styles.actionButton, { borderColor: '#FF9500' }]}
                         onPress={() => handleRevokeProjectsFromUser(member)}
                         disabled={isRevokingAccess}
                       >
-                        <Ionicons name="remove-outline" size={16} color={theme.colors.warning || '#FF9500'} />
+                        <Ionicons name="remove-outline" size={16} color="#FF9500" />
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={[styles.actionButton, { borderColor: theme.colors.danger }]}
@@ -738,10 +754,6 @@ export default function SettingsScreen() {
 
           <View style={[styles.section, { borderBottomColor: theme.colors.border }]}>
             <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Користувачі, які надали мені доступ</Text>
-            <Text style={[styles.sectionDescription, { color: theme.colors.textSecondary }]}>
-              Користувачі, які надали вам доступ до своїх проєктів. Ви можете відписатися від них у будь-який час і втратите доступ до всіх їх проєктів.
-            </Text>
-
             <View style={styles.sharedUsersList}>
               {usersWhoGrantedAccess.length === 0 ? (
                 <Text style={[styles.emptySharedUsersText, { color: theme.colors.textSecondary }]}>
@@ -786,16 +798,6 @@ export default function SettingsScreen() {
             </View>
           </View>
 
-          <View style={[styles.section, styles.footerSection]}>
-            <TouchableOpacity
-              style={[styles.button, { backgroundColor: theme.colors.danger }]}
-              onPress={handleLogout}
-            >
-              <Text style={[styles.buttonDangerText, { color: theme.colors.dangerText }]}>
-                Вийти з акаунту
-              </Text>
-            </TouchableOpacity>
-          </View>
         </View>
       </ScrollView>
 
@@ -1141,12 +1143,24 @@ const createStyles = (colors: any) =>
     },
     header: {
       paddingHorizontal: 20,
-      paddingBottom: 16,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    headerSpacer: {
+      width: 40,
     },
     title: {
       fontSize: 24,
       fontWeight: 'bold',
       textAlign: 'center',
+      flex: 1,
+    },
+    logoutButton: {
+      width: 40,
+      height: 40,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     section: {
       paddingHorizontal: 20,
@@ -1164,7 +1178,7 @@ const createStyles = (colors: any) =>
     sectionDescription: {
       fontSize: 14,
       lineHeight: 20,
-      marginBottom: 20,
+      marginBottom: 16,
     },
     infoCard: {
       padding: 16,
