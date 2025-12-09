@@ -85,12 +85,26 @@ export async function requestNotificationPermissions(): Promise<boolean> {
 
   // Для Android потрібен канал
   if (Platform.OS === 'android') {
+    try {
+      // Спочатку видаляємо старий канал, якщо він існує (щоб застосувати нові налаштування)
+      // На Android канали не можна редагувати після створення, тому видаляємо і створюємо заново
+      await Notifications.deleteNotificationChannelAsync('default');
+    } catch (error) {
+      // Канал може не існувати - це нормально
+    }
+    
+    // Створюємо новий канал з оновленими налаштуваннями
     await Notifications.setNotificationChannelAsync('default', {
-      name: 'default',
-      importance: Notifications.AndroidImportance.MAX,
+      name: 'Remonto',
+      description: 'Сповіщення про події в проєктах та доступ від інших користувачів',
+      importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#1F2C3D',
       sound: 'default',
+      enableVibrate: true,
+      enableLights: true,
+      showBadge: true,
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     });
   }
 

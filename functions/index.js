@@ -38,6 +38,14 @@ async function sendFCMNotification(userId, title, body, data = {}) {
         notification: {
           channelId: 'default',
           sound: 'default',
+          // Не вказуємо icon - Expo автоматично використовує іконку з app.json
+          // icon: 'ic_notification', // Expo генерує це автоматично
+          color: '#1F2C3D',
+          priority: 'high',
+          defaultSound: true,
+          defaultVibrateTimings: true,
+          defaultLightSettings: true,
+          visibility: 'public',
         },
       },
       apns: {
@@ -45,7 +53,15 @@ async function sendFCMNotification(userId, title, body, data = {}) {
           aps: {
             sound: 'default',
             badge: 1,
+            alert: {
+              title: title,
+              body: body,
+            },
+            'mutable-content': 1,
           },
+        },
+        fcmOptions: {
+          imageUrl: undefined, // Можна додати URL зображення для iOS
         },
       },
     };
