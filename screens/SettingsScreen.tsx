@@ -32,7 +32,7 @@ import { db } from '../config/firebase';
 
 const PROJECTS_COLLECTION = 'projects';
 import { formatDateShort } from '../utils/helpers';
-import { removeEmail } from '../utils/secureStorage';
+import { removeEmail, saveNotificationsEnabled, getNotificationsEnabled, removeNotificationsEnabled } from '../utils/secureStorage';
 import { showErrorToast, showSuccessToast, showWarningToast } from '../utils/toast';
 import { useConfirmDialog } from '../contexts/ConfirmDialogContext';
 import ClearableTextInput from '../components/ClearableTextInput';
@@ -44,7 +44,8 @@ import {
   saveFCMTokenToFirestore, 
   removeFCMTokenFromFirestore,
   getNotificationPermissionsStatus,
-  requestNotificationPermissions 
+  requestNotificationPermissions,
+  updateNotificationsEnabled
 } from '../services/fcmNotifications';
 
 export default function SettingsScreen() {
@@ -118,9 +119,24 @@ export default function SettingsScreen() {
       if (!user) return;
       
       try {
-        const status = await getNotificationPermissionsStatus();
-        const isEnabled = status.granted && (userData?.notificationsEnabled ?? false);
-        setNotificationsEnabled(isEnabled);
+        // Спочатку завантажуємо збережений стан з AsyncStorage для поточного користувача
+        const savedEnabled = await getNotificationsEnabled(user.uid);
+        
+        // Якщо є збережений стан, використовуємо його
+        if (savedEnabled !== null) {
+          const status = await getNotificationPermissionsStatus();
+          const isEnabled = status.granted && savedEnabled;
+          setNotificationsEnabled(isEnabled);
+        } else {
+          // Якщо немає збереженого стану, використовуємо дані з Firebase
+          const status = await getNotificationPermissionsStatus();
+          const isEnabled = status.granted && (userData?.notificationsEnabled ?? false);
+          setNotificationsEnabled(isEnabled);
+          // Зберігаємо поточний стан в AsyncStorage
+          if (isEnabled) {
+            await saveNotificationsEnabled(user.uid, true);
+          }
+        }
       } catch (error) {
         console.error('Помилка перевірки статусу нотифікацій:', error);
       }
@@ -590,8 +606,15 @@ export default function SettingsScreen() {
     try {
       if (notificationsEnabled) {
         // Вимкнути нотифікації
+        // Спочатку оновлюємо notificationsEnabled в Firestore, щоб Cloud Functions не відправляли нотифікації
+        await updateNotificationsEnabled(user.uid, false);
+        // Потім видаляємо токен
         await removeFCMTokenFromFirestore(user.uid);
         setNotificationsEnabled(false);
+        // Зберігаємо стан в AsyncStorage для поточного користувача
+        await saveNotificationsEnabled(user.uid, false);
+        // Оновлюємо дані користувача для синхронізації стану
+        await refreshUserData();
         showSuccessToast('Нотифікації вимкнено');
       } else {
         // Увімкнути нотифікації
@@ -601,6 +624,8 @@ export default function SettingsScreen() {
           if (token) {
             await saveFCMTokenToFirestore(user.uid, token);
             setNotificationsEnabled(true);
+            // Зберігаємо стан в AsyncStorage для поточного користувача
+            await saveNotificationsEnabled(user.uid, true);
             await refreshUserData();
             showSuccessToast('Нотифікації увімкнено');
           } else {
@@ -630,9 +655,12 @@ export default function SettingsScreen() {
     if (!confirmed) return;
 
     await logoutUser();
-    // Очищаємо збережений email (паролів не зберігаємо!)
+    // Очищаємо збережений email та налаштування нотифікацій (паролів не зберігаємо!)
     try {
       await removeEmail();
+      if (user) {
+        await removeNotificationsEnabled(user.uid);
+      }
     } catch (error) {
       console.error('Помилка очищення даних входу:', error);
     }

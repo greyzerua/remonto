@@ -161,12 +161,29 @@ export async function saveFCMTokenToFirestore(
 export async function removeFCMTokenFromFirestore(userId: string): Promise<void> {
   try {
     const userRef = doc(db, 'users', userId);
+    // Явно встановлюємо notificationsEnabled: false, щоб Cloud Functions не відправляли нотифікації
     await updateDoc(userRef, {
       fcmToken: null,
       notificationsEnabled: false,
+      tokenUpdatedAt: new Date().toISOString(),
     });
   } catch (error) {
     console.error('Помилка видалення FCM token:', error);
+    throw error;
+  }
+}
+
+/**
+ * Оновити стан нотифікацій в Firestore без зміни токену
+ */
+export async function updateNotificationsEnabled(userId: string, enabled: boolean): Promise<void> {
+  try {
+    const userRef = doc(db, 'users', userId);
+    await updateDoc(userRef, {
+      notificationsEnabled: enabled,
+    });
+  } catch (error) {
+    console.error('Помилка оновлення стану нотифікацій:', error);
     throw error;
   }
 }
