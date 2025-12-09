@@ -20,6 +20,10 @@ async function sendFCMNotification(userId, title, body, data = {}) {
       return;
     }
 
+    // Отримуємо поточну кількість непрочитаних нотифікацій та збільшуємо на 1
+    const currentBadgeCount = userData.badgeCount || 0;
+    const newBadgeCount = currentBadgeCount + 1;
+
     const message = {
       notification: {
         title: title,
@@ -31,6 +35,7 @@ async function sendFCMNotification(userId, title, body, data = {}) {
           return acc;
         }, {}),
         click_action: 'FLUTTER_NOTIFICATION_CLICK',
+        badgeCount: String(newBadgeCount), // Додаємо badge count в дані для Android
       },
       token: userData.fcmToken,
       android: {
@@ -52,7 +57,7 @@ async function sendFCMNotification(userId, title, body, data = {}) {
         payload: {
           aps: {
             sound: 'default',
-            badge: 1,
+            badge: newBadgeCount, // Динамічний badge для iOS
             alert: {
               title: title,
               body: body,
@@ -67,6 +72,12 @@ async function sendFCMNotification(userId, title, body, data = {}) {
     };
 
     const response = await admin.messaging().send(message);
+    
+    // Оновлюємо badge count в Firestore
+    await admin.firestore().collection('users').doc(userId).update({
+      badgeCount: newBadgeCount,
+    });
+    
     return response;
   } catch (error) {
     console.error('Помилка відправки FCM нотифікації:', error);

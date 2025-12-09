@@ -7,10 +7,11 @@ import { AuthUser, User } from '../types';
 import { saveEmail, removeEmail } from '../utils/secureStorage';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import { getUsersByIds } from '../services/firestore';
+import { getUsersByIds, subscribeToProjects } from '../services/firestore';
 import { showWarningToast, showSuccessToast } from '../utils/toast';
-import { getFCMToken, saveFCMTokenToFirestore } from '../services/fcmNotifications';
+import { getFCMToken, saveFCMTokenToFirestore, clearBadgeCountAndUpdateFirestore } from '../services/fcmNotifications';
 import * as Notifications from 'expo-notifications';
+import { Project } from '../types';
 
 const USERS_COLLECTION = 'users';
 
@@ -23,6 +24,7 @@ interface AuthContextType {
   loading: boolean;
   refreshUserData: () => Promise<void>;
   setRevokingAccessUserId: (userId: string | null) => void;
+  setLeavingUserId: (userId: string | null) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -33,6 +35,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const previousSharedUserIdsRef = useRef<string[]>([]);
   const revokingAccessUserIdsRef = useRef<Set<string>>(new Set());
+  const leavingUserIdsRef = useRef<Set<string>>(new Set());
+  const previousProjectsRef = useRef<Map<string, Project>>(new Map());
+  const projectsInitCallCountRef = useRef(0);
+  const updateProjectsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const refreshUserData = async () => {
     if (user) {
@@ -204,6 +210,172 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [user]);
 
+  // Відстежуємо зміни в проектах для показу тостів про новий доступ (працює на всіх екранах)
+  useEffect(() => {
+    if (!user) {
+      previousProjectsRef.current = new Map();
+      projectsInitCallCountRef.current = 0;
+      return;
+    }
+
+    // Скидаємо лічильник при зміні користувача (при вході)
+    previousProjectsRef.current = new Map();
+    projectsInitCallCountRef.current = 0;
+
+    const unsubscribe = subscribeToProjects(user.uid, (updatedProjects) => {
+      const currentProjectsMap = new Map(updatedProjects.map(p => [p.id, p]));
+      const previousProjectsMap = previousProjectsRef.current;
+      
+      // subscribeToProjects викликає callback двічі при ініціалізації:
+      // 1. Перший раз - для власних проектів (where('createdBy', '==', userId))
+      // 2. Другий раз - для спільних проектів (where('members', 'array-contains', userId))
+      // Після другого виклику вважаємо ініціалізацію завершеною
+      if (projectsInitCallCountRef.current < 2) {
+        previousProjectsRef.current = new Map(updatedProjects.map(p => [p.id, p]));
+        projectsInitCallCountRef.current++;
+        return;
+      }
+      
+      // Показуємо тости тільки після завершення ініціалізації (після 2-х викликів)
+      if (previousProjectsMap.size > 0) {
+        // Знаходимо нові спільні проєкти (ті, до яких надали доступ)
+        const newSharedProjects = updatedProjects.filter(project => {
+          const isNew = !previousProjectsMap.has(project.id);
+          const isShared = project.createdBy !== user.uid;
+          return isNew && isShared;
+        });
+
+        if (newSharedProjects.length > 0) {
+          // Групуємо проекти за власником
+          const projectsByOwner = new Map<string, Project[]>();
+          newSharedProjects.forEach(project => {
+            const ownerId = project.createdBy;
+            if (!projectsByOwner.has(ownerId)) {
+              projectsByOwner.set(ownerId, []);
+            }
+            projectsByOwner.get(ownerId)!.push(project);
+          });
+
+          // Показуємо Toast для кожного власника
+          projectsByOwner.forEach(async (projects, ownerId) => {
+            try {
+              const owners = await getUsersByIds([ownerId]);
+              if (owners.length > 0) {
+                const owner = owners[0];
+                const projectsCount = projects.length;
+                
+                // Формуємо правильне слово для української мови
+                let projectWord;
+                const lastDigit = projectsCount % 10;
+                const lastTwoDigits = projectsCount % 100;
+                
+                if (lastTwoDigits >= 11 && lastTwoDigits <= 19) {
+                  projectWord = 'проєктів';
+                } else if (lastDigit === 1) {
+                  projectWord = 'проєкту';
+                } else if (lastDigit >= 2 && lastDigit <= 4) {
+                  projectWord = 'проєктів';
+                } else {
+                  projectWord = 'проєктів';
+                }
+
+                const message = `${owner.displayName || owner.email} надав вам доступ до ${projectsCount} ${projectWord}`;
+                showSuccessToast(message, 'Доступ надано');
+              }
+            } catch (error) {
+              console.error('Помилка отримання інформації про власника:', error);
+            }
+          });
+        }
+
+        // Знаходимо проєкти, з яких забрали доступ
+        const revokedProjects: Project[] = [];
+        previousProjectsMap.forEach((previousProject, projectId) => {
+          if (!currentProjectsMap.has(projectId)) {
+            if (previousProject.createdBy !== user.uid) {
+              revokedProjects.push(previousProject);
+            }
+          }
+        });
+
+        if (revokedProjects.length > 0) {
+          // Групуємо проекти за власником
+          const projectsByOwner = new Map<string, Project[]>();
+          revokedProjects.forEach(project => {
+            const ownerId = project.createdBy;
+            if (!projectsByOwner.has(ownerId)) {
+              projectsByOwner.set(ownerId, []);
+            }
+            projectsByOwner.get(ownerId)!.push(project);
+          });
+
+          // Показуємо Toast для кожного власника
+          projectsByOwner.forEach(async (projects, ownerId) => {
+            // Перевіряємо, чи це самостійна відписка (користувач сам відписався)
+            if (leavingUserIdsRef.current.has(ownerId)) {
+              // Це самостійна відписка - не показуємо повідомлення про забору доступу
+              // Повідомлення про самостійну відписку показується в SettingsScreen
+              return;
+            }
+            
+            try {
+              const owners = await getUsersByIds([ownerId]);
+              if (owners.length > 0) {
+                const owner = owners[0];
+                const projectsCount = projects.length;
+                
+                // Формуємо правильне слово для української мови
+                let projectWord;
+                const lastDigit = projectsCount % 10;
+                const lastTwoDigits = projectsCount % 100;
+                
+                if (lastTwoDigits >= 11 && lastTwoDigits <= 19) {
+                  projectWord = 'проєктів';
+                } else if (lastDigit === 1) {
+                  projectWord = 'проєкту';
+                } else if (lastDigit >= 2 && lastDigit <= 4) {
+                  projectWord = 'проєктів';
+                } else {
+                  projectWord = 'проєктів';
+                }
+
+                const message = `${owner.displayName || owner.email} забрав у вас доступ до ${projectsCount} ${projectWord}`;
+                showWarningToast(message, 'Доступ скасовано');
+              }
+            } catch (error) {
+              console.error('Помилка отримання інформації про власника:', error);
+            }
+          });
+        }
+      }
+      
+      // Оновлюємо попередній список проектів з затримкою, щоб зібрати всі зміни
+      // Коли забирають доступ з кількох проектів, оновлення можуть приходити окремо
+      // Використовуємо debounce, щоб дочекатися всіх оновлень перед оновленням previousProjectsRef
+      if (projectsInitCallCountRef.current >= 2) {
+        // Скасовуємо попередній таймер, якщо він є
+        if (updateProjectsTimeoutRef.current) {
+          clearTimeout(updateProjectsTimeoutRef.current);
+        }
+        
+        // Встановлюємо новий таймер для оновлення previousProjectsRef
+        updateProjectsTimeoutRef.current = setTimeout(() => {
+          previousProjectsRef.current = new Map(updatedProjects.map(p => [p.id, p]));
+          updateProjectsTimeoutRef.current = null;
+        }, 300); // Затримка 300мс для збору всіх змін
+      }
+    });
+
+    return () => {
+      unsubscribe();
+      // Очищаємо таймер при виході
+      if (updateProjectsTimeoutRef.current) {
+        clearTimeout(updateProjectsTimeoutRef.current);
+        updateProjectsTimeoutRef.current = null;
+      }
+    };
+  }, [user]);
+
   // Відстежуємо зміни в sharedUsers для показу тостів про надання/відписку доступу (працює на всіх екранах)
   useEffect(() => {
     const currentSharedUserIds = userData?.sharedUsers || [];
@@ -311,7 +483,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [user]);
 
-  // Обробка вхідних нотифікацій
+  // Обробка вхідних нотифікацій та очищення badge при відкритті додатку
   useEffect(() => {
     if (!user) return;
 
@@ -336,14 +508,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     // Обробка натискання на нотифікацію
-    const responseListener = Notifications.addNotificationResponseReceivedListener(response => {
+    const responseListener = Notifications.addNotificationResponseReceivedListener(async (response) => {
       const data = response.notification.request.content.data;
+      // Очищаємо badge count при натисканні на нотифікацію
+      if (user) {
+        await clearBadgeCountAndUpdateFirestore(user.uid);
+      }
       // Навігація до потрібного екрану може бути додана тут
+    });
+
+    // Очищаємо badge count, коли додаток стає активним (користувач відкриває додаток)
+    const appStateListener = AppState.addEventListener('change', async (nextAppState) => {
+      if (nextAppState === 'active' && user) {
+        // Очищаємо badge count при відкритті додатку
+        await clearBadgeCountAndUpdateFirestore(user.uid);
+      }
     });
 
     return () => {
       notificationListener.remove();
       responseListener.remove();
+      appStateListener.remove();
     };
   }, [user]);
 
@@ -357,6 +542,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const setLeavingUserId = (userId: string | null) => {
+    if (userId) {
+      leavingUserIdsRef.current.add(userId);
+      // Очищаємо через затримку, щоб встигти обробити зміни в проектах
+      setTimeout(() => {
+        leavingUserIdsRef.current.delete(userId);
+      }, 2000);
+    } else {
+      leavingUserIdsRef.current.clear();
+    }
+  };
+
   const value: AuthContextType = {
     user,
     authUser,
@@ -364,6 +561,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loading,
     refreshUserData,
     setRevokingAccessUserId,
+    setLeavingUserId,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -49,7 +49,7 @@ import {
 } from '../services/fcmNotifications';
 
 export default function SettingsScreen() {
-  const { user, authUser, userData, refreshUserData, setRevokingAccessUserId } = useAuth();
+  const { user, authUser, userData, refreshUserData, setRevokingAccessUserId, setLeavingUserId } = useAuth();
   const { theme } = useTheme();
   const { showConfirm } = useConfirmDialog();
   const insets = useSafeAreaInsets();
@@ -78,7 +78,7 @@ export default function SettingsScreen() {
   const [isRevokingAccess, setIsRevokingAccess] = useState(false);
   const [sharedProjects, setSharedProjects] = useState<Project[]>([]);
   const [usersWhoGrantedAccess, setUsersWhoGrantedAccess] = useState<User[]>([]);
-  const [leavingUserId, setLeavingUserId] = useState<string | null>(null);
+  const [localLeavingUserId, setLocalLeavingUserId] = useState<string | null>(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const bottomSheetSnapPoints = useMemo(
@@ -303,7 +303,10 @@ export default function SettingsScreen() {
 
     if (!confirmed) return;
 
+    // Вказуємо в AuthContext, що це самостійна відписка (щоб не показувати повідомлення про забору доступу)
     setLeavingUserId(ownerUser.id);
+    setLocalLeavingUserId(ownerUser.id);
+    
     try {
       // Видаляємо себе зі списку sharedUsers власника та з members всіх його проектів
       await leaveUserAccess(ownerUser.id, user.uid);
@@ -312,12 +315,15 @@ export default function SettingsScreen() {
       setUsersWhoGrantedAccess(prev => prev.filter(u => u.id !== ownerUser.id));
       setSharedProjects(prev => prev.filter(p => p.createdBy !== ownerUser.id));
       
-      showSuccessToast('Ви успішно відписалися від користувача');
+      // Показуємо повідомлення про успішну відписку
+      const ownerName = ownerUser.displayName || ownerUser.email;
+      showSuccessToast(`Ви відписались від ${ownerName}`, 'Відписка');
     } catch (error: any) {
       const errorMessage = error?.message || 'Не вдалося відписатися від користувача';
       showErrorToast(errorMessage);
-    } finally {
       setLeavingUserId(null);
+    } finally {
+      setLocalLeavingUserId(null);
     }
   };
 
@@ -928,9 +934,9 @@ export default function SettingsScreen() {
                       <TouchableOpacity
                         style={[styles.actionButton, { borderColor: theme.colors.danger }]}
                         onPress={() => handleLeaveUser(ownerUser)}
-                        disabled={leavingUserId === ownerUser.id}
+                        disabled={localLeavingUserId === ownerUser.id}
                       >
-                        {leavingUserId === ownerUser.id ? (
+                        {localLeavingUserId === ownerUser.id ? (
                           <ActivityIndicator color={theme.colors.danger} size="small" />
                         ) : (
                           <Ionicons name="close-outline" size={16} color={theme.colors.danger} />

@@ -31,6 +31,22 @@ Notifications.setNotificationHandler({
     const isRemoteNotification = trigger && 
       ('type' in trigger && trigger.type === 'push');
     
+    // Оновлюємо badge локально для Android (FCM не підтримує динамічний badge на Android)
+    // Робимо це незалежно від стану додатку
+    if (Platform.OS === 'android' && isRemoteNotification) {
+      // Отримуємо badge count з даних нотифікації
+      const badgeCount = notification.request.content.data?.badgeCount 
+        ? parseInt(notification.request.content.data.badgeCount, 10) 
+        : null;
+      
+      if (badgeCount !== null && !isNaN(badgeCount)) {
+        // Оновлюємо badge локально
+        Notifications.setBadgeCountAsync(badgeCount).catch(error => {
+          console.error('Помилка оновлення badge:', error);
+        });
+      }
+    }
+    
     // Якщо додаток на передньому плані - повністю блокуємо показ нотифікації
     if (isAppInForeground) {
       // Для remote notifications на Android потрібно повністю блокувати показ
@@ -41,7 +57,7 @@ Notifications.setNotificationHandler({
           shouldShowBanner: false,
           shouldShowList: false, // Навіть не додаємо до списку, якщо додаток відкритий
           shouldPlaySound: false,
-          shouldSetBadge: false, // Не оновлюємо бейдж
+          shouldSetBadge: true, // Оновлюємо badge навіть коли додаток на передньому плані
         };
       }
       
@@ -56,6 +72,7 @@ Notifications.setNotificationHandler({
     }
     
     // Коли додаток у фоні або закритий - показуємо нотифікацію
+    
     return {
       shouldShowAlert: true, // iOS - показувати alert
       shouldShowBanner: true, // Android/iOS - показувати банер
@@ -230,6 +247,47 @@ export async function getUserFCMToken(userId: string): Promise<string | null> {
   } catch (error) {
     console.error('Помилка отримання FCM token користувача:', error);
     return null;
+  }
+}
+
+/**
+ * Очистити badge count (встановити в 0)
+ */
+export async function clearBadgeCount(): Promise<void> {
+  try {
+    await Notifications.setBadgeCountAsync(0);
+  } catch (error) {
+    console.error('Помилка очищення badge count:', error);
+  }
+}
+
+/**
+ * Отримати поточний badge count
+ */
+export async function getBadgeCount(): Promise<number> {
+  try {
+    return await Notifications.getBadgeCountAsync();
+  } catch (error) {
+    console.error('Помилка отримання badge count:', error);
+    return 0;
+  }
+}
+
+/**
+ * Очистити badge count та оновити в Firestore
+ */
+export async function clearBadgeCountAndUpdateFirestore(userId: string): Promise<void> {
+  try {
+    // Очищаємо badge локально
+    await clearBadgeCount();
+    
+    // Оновлюємо badgeCount в Firestore
+    const userRef = doc(db, 'users', userId);
+    await updateDoc(userRef, {
+      badgeCount: 0,
+    });
+  } catch (error) {
+    console.error('Помилка очищення badge count та оновлення Firestore:', error);
   }
 }
 
