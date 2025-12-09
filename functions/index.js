@@ -286,3 +286,65 @@ exports.onProjectMemberRemoved = functions
     return null;
   });
 
+/**
+ * Cloud Function: Автоматичне видалення документа користувача з Firestore
+ * при видаленні користувача з Firebase Authentication
+ */
+exports.onUserDeleted = functions
+  .runWith({
+    minInstances: 0,
+    timeoutSeconds: 60,
+    memory: '256MB',
+  })
+  .auth
+  .user()
+  .onDelete(async (user) => {
+    const userId = user.uid;
+    
+    try {
+      // Видаляємо документ користувача з Firestore
+      const userDocRef = admin.firestore().collection('users').doc(userId);
+      const userDoc = await userDocRef.get();
+      
+      if (userDoc.exists) {
+        // Отримуємо дані користувача перед видаленням
+        const userData = userDoc.data();
+        const sharedUsers = userData.sharedUsers || [];
+        
+        // Видаляємо користувача зі списку sharedUsers всіх інших користувачів
+        const batch = admin.firestore().batch();
+        
+        for (const sharedUserId of sharedUsers) {
+          const sharedUserRef = admin.firestore().collection('users').doc(sharedUserId);
+          const sharedUserDoc = await sharedUserRef.get();
+          
+          if (sharedUserDoc.exists) {
+            const sharedUserData = sharedUserDoc.data();
+            const updatedSharedUsers = (sharedUserData.sharedUsers || []).filter(id => id !== userId);
+            batch.update(sharedUserRef, { sharedUsers: updatedSharedUsers });
+          }
+        }
+        
+        // Видаляємо користувача зі всіх проектів, де він є членом
+        const projectsSnapshot = await admin.firestore()
+          .collection('projects')
+          .where('members', 'array-contains', userId)
+          .get();
+        
+        projectsSnapshot.forEach(doc => {
+          const projectData = doc.data();
+          const updatedMembers = (projectData.members || []).filter(id => id !== userId);
+          batch.update(doc.ref, { members: updatedMembers });
+        });
+        
+        // Виконуємо всі оновлення та видаляємо документ користувача
+        await batch.commit();
+        await userDocRef.delete();
+        
+        console.log(`Користувач ${userId} успішно видалений з Firestore та всіх пов'язаних даних`);
+      }
+    } catch (error) {
+      console.error(`Помилка видалення користувача ${userId} з Firestore:`, error);
+    }
+  });
+

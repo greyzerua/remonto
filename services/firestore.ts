@@ -192,6 +192,51 @@ export async function getAllUsers(): Promise<User[]> {
   }
 }
 
+/**
+ * Підписатися на зміни всіх користувачів у Firestore
+ * @param callback Функція, яка викликається при зміні списку користувачів
+ * @returns Функція для відписки
+ */
+export function subscribeToAllUsers(callback: (users: User[]) => void): () => void {
+  const usersRef = collection(db, USERS_COLLECTION);
+  let previousUserIds: Set<string> = new Set();
+  let isInitialLoad = true;
+  
+  const unsubscribe = onSnapshot(
+    usersRef,
+    (querySnapshot) => {
+      const users: User[] = [];
+      
+      // onSnapshot автоматично обробляє видалення - видалені документи просто не з'являються
+      querySnapshot.forEach((docSnap) => {
+        users.push({ id: docSnap.id, ...docSnap.data() } as User);
+      });
+      
+      // Сортуємо за ім'ям або email
+      const sortedUsers = users.sort((a, b) => {
+        const nameA = (a.displayName || a.email || '').toLowerCase();
+        const nameB = (b.displayName || b.email || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+      });
+      
+      // Перевіряємо, чи дійсно змінився список користувачів (їх ID)
+      const currentUserIds = new Set(sortedUsers.map(u => u.id));
+      
+      previousUserIds = currentUserIds;
+      isInitialLoad = false;
+      
+      callback(sortedUsers);
+    },
+    (error) => {
+      console.error('Помилка підписки на користувачів:', error);
+      // У випадку помилки все одно викликаємо callback з порожнім масивом
+      callback([]);
+    }
+  );
+  
+  return unsubscribe;
+}
+
 export async function grantProjectAccessByEmail(ownerId: string, email: string): Promise<User> {
   const targetUser = await findUserByEmail(email);
 

@@ -5,7 +5,7 @@ import { User as FirebaseUser } from 'firebase/auth';
 import { onAuthStateChange, convertToAuthUser, getUserData, getCurrentUser } from '../services/auth';
 import { AuthUser, User } from '../types';
 import { saveEmail, removeEmail } from '../utils/secureStorage';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { getUsersByIds } from '../services/firestore';
 import { showWarningToast, showSuccessToast } from '../utils/toast';
@@ -56,7 +56,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       if (firebaseUser) {
         // Користувач авторизований
-        const data = await getUserData(firebaseUser.uid);
+        let data = await getUserData(firebaseUser.uid);
+        
+        // Якщо документа користувача немає в Firestore, створюємо його
+        // Це може статися, якщо користувач увійшов не через реєстрацію
+        // або документ був видалений
+        if (!data && firebaseUser.email) {
+          try {
+            const userData = {
+              id: firebaseUser.uid,
+              email: firebaseUser.email.toLowerCase(),
+              emailLowercase: firebaseUser.email.toLowerCase(),
+              displayName: firebaseUser.displayName || '',
+              createdAt: new Date().toISOString(),
+              sharedUsers: [],
+            };
+            await setDoc(doc(db, 'users', firebaseUser.uid), userData);
+            data = await getUserData(firebaseUser.uid);
+          } catch (error) {
+            console.error('Помилка створення документа користувача:', error);
+          }
+        }
+        
         if (isMounted) {
           setUserData(data);
           // Зберігаємо інформацію про користувача

@@ -20,6 +20,7 @@ import {
   revokeProjectAccess, 
   getUsersByIds, 
   getAllUsers,
+  subscribeToAllUsers,
   getOwnerProjects,
   grantProjectAccessToSelectedProjects,
   revokeProjectAccessFromSelectedProjects,
@@ -129,40 +130,56 @@ export default function SettingsScreen() {
   }, [user, userData?.notificationsEnabled]);
 
   useEffect(() => {
-    let isMounted = true;
+    if (!user) return;
 
-    const loadAllUsers = async () => {
-      if (!user) return;
+    setAllUsersLoading(true);
+    let previousUserIds: Set<string> = new Set();
 
-      if (isMounted) {
-        setAllUsersLoading(true);
+    // Підписуємося на real-time зміни всіх користувачів
+    const unsubscribe = subscribeToAllUsers((users) => {
+      // Виключаємо поточного користувача зі списку
+      const filteredUsers = users.filter(u => u.id !== user.uid);
+      
+      // Перевіряємо, чи дійсно змінився список (за ID користувачів)
+      const currentUserIds = new Set(filteredUsers.map(u => u.id));
+      const hasChanged = previousUserIds.size !== currentUserIds.size ||
+        ![...currentUserIds].every(id => previousUserIds.has(id));
+      
+      // Оновлюємо стан тільки якщо дійсно змінився список користувачів
+      // Це запобігає зайвим ре-рендерам при оновленні FCM токенів тощо
+      if (hasChanged || previousUserIds.size === 0) {
+        setAllUsers(filteredUsers);
+        previousUserIds = currentUserIds;
       }
-
-      try {
-        const users = await getAllUsers();
-        // Виключаємо поточного користувача зі списку
-        const filteredUsers = users.filter(u => u.id !== user.uid);
-        if (isMounted) {
-          setAllUsers(filteredUsers);
-        }
-      } catch (error) {
-        console.error('Не вдалося завантажити користувачів:', error);
-        if (isMounted) {
-          showErrorToast('Не вдалося завантажити список користувачів');
-        }
-      } finally {
-        if (isMounted) {
-          setAllUsersLoading(false);
-        }
-      }
-    };
-
-    loadAllUsers();
+      
+      setAllUsersLoading(false);
+    });
 
     return () => {
-      isMounted = false;
+      unsubscribe();
     };
   }, [user]);
+
+  // Оновлюємо список користувачів при відкритті bottom sheet
+  // Це допомагає синхронізувати дані, якщо щось змінилося в Firebase
+  useEffect(() => {
+    if (usersBottomSheetVisible && user) {
+      // Невелика затримка, щоб дати час підписці оновитися
+      const timeout = setTimeout(() => {
+        // Підписка вже активна, але можна примусово перезавантажити
+        // Якщо підписка працює правильно, це не потрібно,
+        // але це допомагає у випадках, коли підписка не спрацювала
+        getAllUsers().then((users) => {
+          const filteredUsers = users.filter(u => u.id !== user.uid);
+          setAllUsers(filteredUsers);
+        }).catch((error) => {
+          console.error('Помилка оновлення списку користувачів:', error);
+        });
+      }, 100);
+
+      return () => clearTimeout(timeout);
+    }
+  }, [usersBottomSheetVisible, user]);
 
   useEffect(() => {
     let isMounted = true;

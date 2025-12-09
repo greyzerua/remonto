@@ -1,6 +1,6 @@
 import * as Notifications from 'expo-notifications';
 import { Platform, AppState, AppStateStatus } from 'react-native';
-import { doc, updateDoc, getDoc } from 'firebase/firestore';
+import { doc, updateDoc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { User } from '../types';
 
@@ -128,11 +128,27 @@ export async function saveFCMTokenToFirestore(
 ): Promise<void> {
   try {
     const userRef = doc(db, 'users', userId);
-    await updateDoc(userRef, {
-      fcmToken: token || null,
-      notificationsEnabled: token !== null,
-      tokenUpdatedAt: new Date().toISOString(),
-    });
+    
+    // Перевіряємо, чи існує документ
+    const userDoc = await getDoc(userRef);
+    
+    if (userDoc.exists()) {
+      // Якщо документ існує, оновлюємо його
+      await updateDoc(userRef, {
+        fcmToken: token || null,
+        notificationsEnabled: token !== null,
+        tokenUpdatedAt: new Date().toISOString(),
+      });
+    } else {
+      // Якщо документа немає, створюємо його з merge: true
+      // Це може статися, якщо користувач увійшов не через реєстрацію
+      await setDoc(userRef, {
+        id: userId,
+        fcmToken: token || null,
+        notificationsEnabled: token !== null,
+        tokenUpdatedAt: new Date().toISOString(),
+      }, { merge: true });
+    }
   } catch (error) {
     console.error('Помилка збереження FCM token:', error);
     throw error;
