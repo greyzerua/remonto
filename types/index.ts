@@ -10,6 +10,7 @@ export interface User {
   fcmToken?: string; // FCM токен для push-нотифікацій
   notificationsEnabled?: boolean; // Чи увімкнені нотифікації
   tokenUpdatedAt?: string; // Дата останнього оновлення токену
+  badgeCount?: number; // Кількість непрочитаних нотифікацій для badge
 }
 
 // Типи для проєктів ремонту

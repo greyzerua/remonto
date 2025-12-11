@@ -9,7 +9,7 @@ import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { getUsersByIds, subscribeToProjects } from '../services/firestore';
 import { showWarningToast, showSuccessToast } from '../utils/toast';
-import { getFCMToken, saveFCMTokenToFirestore, clearBadgeCountAndUpdateFirestore } from '../services/fcmNotifications';
+import { getFCMToken, saveFCMTokenToFirestore, clearBadgeCountAndUpdateFirestore, syncBadgeCountFromFirestore, updateBadgeFromNotification } from '../services/fcmNotifications';
 import * as Notifications from 'expo-notifications';
 import { Project } from '../types';
 
@@ -483,13 +483,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [user]);
 
-  // Обробка вхідних нотифікацій та очищення badge при відкритті додатку
+  // Обробка вхідних нотифікацій та синхронізація badge при старті додатку
   useEffect(() => {
     if (!user) return;
 
-    // Обробка нотифікацій, коли додаток на передньому плані
+    // Синхронізуємо badge count з Firestore при старті додатку (для Android)
+    // Це важливо, бо коли додаток закритий, badge не оновлюється
+    const syncBadgeOnStart = async () => {
+      try {
+        await syncBadgeCountFromFirestore(user.uid);
+      } catch (error) {
+        console.error('Помилка синхронізації badge при старті:', error);
+      }
+    };
+    syncBadgeOnStart();
+
+    // Обробка нотифікацій, коли додаток на передньому плані або в фоні
     const notificationListener = Notifications.addNotificationReceivedListener(async (notification) => {
       const appState = AppState.currentState;
+      
+      // Оновлюємо badge з нотифікації (важливо для Android)
+      await updateBadgeFromNotification(notification);
       
       // Якщо додаток на передньому плані, негайно приховуємо нотифікацію програмно
       if (appState === 'active') {
@@ -517,9 +531,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Навігація до потрібного екрану може бути додана тут
     });
 
+    // Обробка нотифікацій, які прийшли коли додаток був закритий
+    // Це важливо для Android, бо handleNotification не викликається коли додаток закритий
+    const checkLastNotification = async () => {
+      try {
+        const lastResponse = await Notifications.getLastNotificationResponseAsync();
+        if (lastResponse) {
+          await updateBadgeFromNotification(lastResponse.notification);
+        }
+      } catch (error) {
+        console.error('Помилка перевірки останньої нотифікації:', error);
+      }
+    };
+    checkLastNotification();
+
     // Очищаємо badge count, коли додаток стає активним (користувач відкриває додаток)
     const appStateListener = AppState.addEventListener('change', async (nextAppState) => {
       if (nextAppState === 'active' && user) {
+        // Синхронізуємо badge з Firestore перед очищенням
+        // (на випадок якщо прийшли нотифікації поки додаток був закритий)
+        await syncBadgeCountFromFirestore(user.uid);
         // Очищаємо badge count при відкритті додатку
         await clearBadgeCountAndUpdateFirestore(user.uid);
       }

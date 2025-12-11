@@ -43,14 +43,21 @@ async function sendFCMNotification(userId, title, body, data = {}) {
         notification: {
           channelId: 'default',
           sound: 'default',
-          // Не вказуємо icon - Expo автоматично використовує іконку з app.json
-          // icon: 'ic_notification', // Expo генерує це автоматично
-          color: '#1F2C3D',
+          // Expo автоматично використовує іконку з app.json (expo-notifications plugin)
+          // Маленька іконка (small icon) має бути білою на прозорому фоні для Android
+          // Розмір: 24x24dp, формат: PNG з прозорим фоном
+          color: '#1F2C3D', // Колір акценту для нотифікації (використовується для іконки та тексту)
           priority: 'high',
           defaultSound: true,
           defaultVibrateTimings: true,
           defaultLightSettings: true,
           visibility: 'public',
+          // Додаємо стилізацію для кращого відображення
+          tag: 'remonto_notification',
+          clickAction: 'FLUTTER_NOTIFICATION_CLICK',
+          // Стиль нотифікації: 'default' показує стандартну нотифікацію з іконкою та текстом
+          // Можна використати 'bigtext' або 'inbox' для розширених нотифікацій
+          style: 'default',
         },
       },
       apns: {

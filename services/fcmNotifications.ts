@@ -4,6 +4,15 @@ import { doc, updateDoc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { User } from '../types';
 
+/**
+ * ВАЖЛИВО для Android Badge:
+ * - Badge з цифрами підтримується не всіма launcher'ами
+ * - Стандартний Android launcher може показувати тільки крапку без цифр
+ * - Деякі launcher'и (Samsung, Xiaomi, тощо) можуть показувати цифри
+ * - expo-notifications використовує NotificationChannel для badge, але це не гарантує відображення цифр
+ * - Якщо badge не показує цифри, це обмеження launcher'а, а не помилка коду
+ */
+
 // Зберігаємо поточний стан додатку для точнішої перевірки
 let currentAppState: AppStateStatus = AppState.currentState;
 
@@ -31,33 +40,22 @@ Notifications.setNotificationHandler({
     const isRemoteNotification = trigger && 
       ('type' in trigger && trigger.type === 'push');
     
-    // Оновлюємо badge локально для Android (FCM не підтримує динамічний badge на Android)
-    // Робимо це незалежно від стану додатку
-    if (Platform.OS === 'android' && isRemoteNotification) {
-      // Отримуємо badge count з даних нотифікації
-      const badgeCount = notification.request.content.data?.badgeCount 
-        ? parseInt(notification.request.content.data.badgeCount, 10) 
-        : null;
-      
-      if (badgeCount !== null && !isNaN(badgeCount)) {
-        // Оновлюємо badge локально
-        Notifications.setBadgeCountAsync(badgeCount).catch(error => {
-          console.error('Помилка оновлення badge:', error);
-        });
-      }
-    }
+    // Для Android badge працює через кількість активних нотифікацій у каналі
+    // setBadgeCountAsync не працює на Android через expo-notifications
+    // Тому для відображення badge потрібно залишати нотифікації в системі
     
-    // Якщо додаток на передньому плані - повністю блокуємо показ нотифікації
+    // Якщо додаток на передньому плані - блокуємо показ, але залишаємо для badge
     if (isAppInForeground) {
-      // Для remote notifications на Android потрібно повністю блокувати показ
+      // Для remote notifications на Android
       if (Platform.OS === 'android' && isRemoteNotification) {
-        // Повертаємо об'єкт, який повністю блокує показ
+        // Залишаємо нотифікацію в системі для badge, але не показуємо її
+        // Це дозволить badge відображати кількість непрочитаних нотифікацій
         return {
-          shouldShowAlert: false,
-          shouldShowBanner: false,
-          shouldShowList: false, // Навіть не додаємо до списку, якщо додаток відкритий
-          shouldPlaySound: false,
-          shouldSetBadge: true, // Оновлюємо badge навіть коли додаток на передньому плані
+          shouldShowAlert: false, // Не показувати alert
+          shouldShowBanner: false, // Не показувати банер
+          shouldShowList: true, // Додаємо до списку для badge count
+          shouldPlaySound: false, // Без звуку
+          shouldSetBadge: true, // Оновлюємо badge
         };
       }
       
@@ -65,7 +63,7 @@ Notifications.setNotificationHandler({
       return {
         shouldShowAlert: false, // iOS - не показувати alert
         shouldShowBanner: false, // Android/iOS - не показувати банер
-        shouldShowList: true, // Додаємо до списку для історії
+        shouldShowList: true, // Додаємо до списку для історії та badge
         shouldPlaySound: false, // Без звуку
         shouldSetBadge: true, // Бейдж завжди
       };
@@ -96,7 +94,6 @@ export async function requestNotificationPermissions(): Promise<boolean> {
   }
 
   if (finalStatus !== 'granted') {
-    console.warn('Дозвіл на нотифікації не надано');
     return false;
   }
 
@@ -111,16 +108,17 @@ export async function requestNotificationPermissions(): Promise<boolean> {
     }
     
     // Створюємо новий канал з оновленими налаштуваннями
+    // Іконка для нотифікацій налаштовується через app.json (expo-notifications plugin)
     await Notifications.setNotificationChannelAsync('default', {
       name: 'Remonto',
       description: 'Сповіщення про події в проєктах та доступ від інших користувачів',
       importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#1F2C3D',
+      lightColor: '#1F2C3D', // Колір індикатора світла
       sound: 'default',
       enableVibrate: true,
       enableLights: true,
-      showBadge: true,
+      showBadge: true, // Увімкнути badge для каналу
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     });
   }
@@ -252,10 +250,20 @@ export async function getUserFCMToken(userId: string): Promise<string | null> {
 
 /**
  * Очистити badge count (встановити в 0)
+ * 
+ * ВАЖЛИВО для Android:
+ * - setBadgeCountAsync не працює на Android через expo-notifications
+ * - Для очищення badge потрібно видалити всі нотифікації з каналу
  */
 export async function clearBadgeCount(): Promise<void> {
   try {
-    await Notifications.setBadgeCountAsync(0);
+    if (Platform.OS === 'android') {
+      // На Android видаляємо всі нотифікації для очищення badge
+      await Notifications.dismissAllNotificationsAsync();
+    } else {
+      // Для iOS встановлюємо badge в 0
+      await Notifications.setBadgeCountAsync(0);
+    }
   } catch (error) {
     console.error('Помилка очищення badge count:', error);
   }
@@ -288,6 +296,65 @@ export async function clearBadgeCountAndUpdateFirestore(userId: string): Promise
     });
   } catch (error) {
     console.error('Помилка очищення badge count та оновлення Firestore:', error);
+  }
+}
+
+/**
+ * Синхронізувати badge count з Firestore (для Android, коли додаток закритий)
+ * Викликається при старті додатку, щоб оновити badge з сервера
+ * 
+ * ВАЖЛИВО для Android:
+ * - setBadgeCountAsync не працює на Android через expo-notifications
+ * - Badge на Android відображається автоматично на основі кількості активних нотифікацій
+ * - Для відображення badge потрібно залишати нотифікації в системі
+ */
+export async function syncBadgeCountFromFirestore(userId: string): Promise<void> {
+  try {
+    const userDoc = await getDoc(doc(db, 'users', userId));
+    if (userDoc.exists()) {
+      const userData = userDoc.data() as User;
+      const badgeCount = userData.badgeCount || 0;
+      
+      if (Platform.OS !== 'android') {
+        // Для iOS встановлюємо badge count
+        await Notifications.setBadgeCountAsync(badgeCount);
+      }
+    }
+  } catch (error) {
+    console.error('Помилка синхронізації badge count з Firestore:', error);
+  }
+}
+
+/**
+ * Оновити badge count з даних нотифікації
+ * Викликається при отриманні нотифікації, навіть коли додаток закритий
+ * 
+ * ВАЖЛИВО для Android:
+ * - setBadgeCountAsync не працює на Android через expo-notifications
+ * - Badge відображається автоматично на основі кількості активних нотифікацій
+ * - Функція залишена для iOS та майбутньої підтримки
+ */
+export async function updateBadgeFromNotification(notification: Notifications.Notification): Promise<void> {
+  try {
+    const trigger = notification.request.trigger;
+    const isRemoteNotification = trigger && 
+      ('type' in trigger && trigger.type === 'push');
+    
+    if (isRemoteNotification) {
+      const badgeCountValue = notification.request.content.data?.badgeCount;
+      const badgeCount = badgeCountValue && typeof badgeCountValue === 'string'
+        ? parseInt(badgeCountValue, 10) 
+        : null;
+      
+      if (badgeCount !== null && !isNaN(badgeCount) && badgeCount >= 0) {
+        if (Platform.OS !== 'android') {
+          // Для iOS встановлюємо badge count
+          await Notifications.setBadgeCountAsync(badgeCount);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Помилка оновлення badge з нотифікації:', error);
   }
 }
 
