@@ -267,11 +267,11 @@ const createStyles = (colors: any) =>
     },
     addButton: {
       borderRadius: 8,
-      padding: 16,
+      padding: 12,
       alignItems: 'center',
     },
     addButtonText: {
-      fontSize: 16,
+      fontSize: 14,
       fontWeight: '600',
     },
     projectTotalContainer: {
@@ -280,19 +280,14 @@ const createStyles = (colors: any) =>
       alignItems: 'center',
       paddingTop: 12,
       borderTopWidth: 2,
-      shadowColor: colors.shadow,
-      shadowOffset: { width: 0, height: -2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 4,
-      elevation: 5,
     },
     projectTotalLabel: {
-      fontSize: 18,
+      fontSize: 16,
       fontWeight: '600',
       flex: 1,
     },
     projectTotalAmount: {
-      fontSize: 24,
+      fontSize: 20,
       fontWeight: 'bold',
       textAlign: 'right',
     },
@@ -309,11 +304,11 @@ const createStyles = (colors: any) =>
     },
     createButton: {
       borderRadius: 8,
-      padding: 16,
-      paddingHorizontal: 32,
+      padding: 12,
+      paddingHorizontal: 24,
     },
     createButtonText: {
-      fontSize: 16,
+      fontSize: 14,
       fontWeight: '600',
     },
   });

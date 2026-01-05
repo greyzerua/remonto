@@ -623,26 +623,27 @@ const createStyles = (colors: any) =>
     },
     addButton: {
       borderRadius: 8,
-      padding: 16,
+      padding: 12,
       alignItems: 'center',
     },
     addButtonText: {
-      fontSize: 16,
+      fontSize: 14,
       fontWeight: '600',
     },
     projectCard: {
       borderRadius: 12,
-      padding: 16,
+      padding: 12,
+      marginBottom: 12,
       borderWidth: 1,
     },
     projectHeader: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
-      marginBottom: 8,
+      marginBottom: 6,
     },
     projectName: {
-      fontSize: 18,
+      fontSize: 16,
       fontWeight: '600',
       flex: 1,
     },
@@ -656,38 +657,39 @@ const createStyles = (colors: any) =>
       fontWeight: '600',
     },
     projectDescription: {
-      fontSize: 14,
-      marginBottom: 12,
+      fontSize: 13,
+      marginBottom: 8,
     },
     projectInfo: {
-      marginBottom: 12,
+      marginBottom: 8,
     },
     projectDate: {
-      fontSize: 12,
+      fontSize: 11,
     },
     projectActions: {
       flexDirection: 'row',
       gap: 8,
+      marginTop: 8,
     },
     editButton: {
       flex: 1,
       borderRadius: 8,
-      padding: 10,
+      padding: 8,
       alignItems: 'center',
       borderWidth: 1,
     },
     editButtonText: {
-      fontSize: 14,
+      fontSize: 13,
       fontWeight: '600',
     },
     deleteButton: {
       flex: 1,
       borderRadius: 8,
-      padding: 10,
+      padding: 8,
       alignItems: 'center',
     },
     deleteButtonText: {
-      fontSize: 14,
+      fontSize: 13,
       fontWeight: '600',
     },
     emptyContainer: {
@@ -708,11 +710,11 @@ const createStyles = (colors: any) =>
     },
     createButton: {
       borderRadius: 8,
-      padding: 16,
-      paddingHorizontal: 32,
+      padding: 12,
+      paddingHorizontal: 24,
     },
     createButtonText: {
-      fontSize: 16,
+      fontSize: 14,
       fontWeight: '600',
     },
     bottomSheetScrollContent: {

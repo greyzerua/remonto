@@ -1614,14 +1614,14 @@ const createStyles = (colors: any) =>
       alignItems: 'center',
       justifyContent: 'center',
       borderRadius: 12,
-      paddingVertical: 14,
-      paddingHorizontal: 20,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
       borderWidth: 1,
       marginBottom: 20,
       gap: 8,
     },
     selectUserButtonText: {
-      fontSize: 16,
+      fontSize: 14,
       fontWeight: '600',
     },
     bottomSheetWrapper: {

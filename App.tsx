@@ -1,12 +1,14 @@
 import 'react-native-screens';
+import { useEffect } from 'react';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { View, ActivityIndicator, StyleSheet, Platform, Image } from 'react-native';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { View, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
+import * as SplashScreen from 'expo-splash-screen';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 import { ConfirmDialogProvider } from './contexts/ConfirmDialogContext';
@@ -16,6 +18,9 @@ import ExpensesScreen from './screens/ExpensesScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import ToastComponent from './components/Toast';
 
+// Запобігаємо автоматичному приховуванню splash screen
+SplashScreen.preventAutoHideAsync();
+
 const Tab = createBottomTabNavigator();
 
 function MainNavigator() {
@@ -23,21 +28,12 @@ function MainNavigator() {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
 
-  if (authLoading) {
-    return (
-      <SafeAreaView
-        style={styles.splashContainer}
-        edges={['top', 'bottom']}
-      >
-        <Image
-          source={require('./assets/transparent-logo.png')}
-          style={styles.splashLogo}
-          resizeMode="contain"
-        />
-        <ActivityIndicator size="small" color="#1F2C3D" style={styles.splashSpinner} />
-      </SafeAreaView>
-    );
-  }
+  // Приховуємо нативний splash screen після завершення завантаження авторизації
+  useEffect(() => {
+    if (!authLoading) {
+      SplashScreen.hideAsync();
+    }
+  }, [authLoading]);
 
   if (!user) {
     return <AuthScreen />;
@@ -194,19 +190,3 @@ export default function App() {
   );
 }
 
-const styles = StyleSheet.create({
-  splashContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#E6ECF4',
-  },
-  splashLogo: {
-    width: '70%',
-    maxWidth: 320,
-    aspectRatio: 1,
-  },
-  splashSpinner: {
-    marginTop: 32,
-  },
-});

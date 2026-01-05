@@ -4,7 +4,7 @@
     "slug": "Remonto",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/Splash-logo.png",
+    "icon": "./assets/transparent-logo.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
