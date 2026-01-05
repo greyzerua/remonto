@@ -56,8 +56,8 @@ export default function ExpenseModal({
       <View style={styles.bottomSheetWrapper}>
         <BottomSheetScrollView
           keyboardShouldPersistTaps="handled"
-          style={{ maxHeight: bottomSheetContentMaxHeight }}
-          contentContainerStyle={[styles.bottomSheetScrollContent, { paddingBottom: insets.bottom + 24 }]}
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.bottomSheetScrollContent}
           showsVerticalScrollIndicator={true}
           bounces={false}
         >
@@ -163,6 +163,7 @@ export default function ExpenseModal({
             styles.bottomSheetActionsContainer,
             {
               borderTopColor: theme.colors.border,
+              borderTopWidth: 1,
               backgroundColor: theme.colors.surface,
               paddingBottom: insets.bottom + 16,
             },
@@ -204,12 +205,16 @@ const createStyles = (colors: any) =>
   StyleSheet.create({
     bottomSheetWrapper: {
       flex: 1,
+      flexDirection: 'column',
     },
     bottomSheetScrollContent: {
       paddingHorizontal: 20,
+      paddingTop: 20,
+      paddingBottom: 24,
     },
     bottomSheetActionsContainer: {
       paddingHorizontal: 20,
+      paddingTop: 16,
     },
     modalTitle: {
       fontSize: 20,

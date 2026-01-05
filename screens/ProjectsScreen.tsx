@@ -435,11 +435,8 @@ export default function ProjectsScreen() {
           <View style={styles.bottomSheetWrapper}>
             <BottomSheetScrollView
               keyboardShouldPersistTaps="handled"
-              style={{ maxHeight: bottomSheetContentMaxHeight }}
-              contentContainerStyle={[
-                styles.bottomSheetScrollContent,
-                { paddingBottom: insets.bottom + 24 },
-              ]}
+              style={{ flex: 1 }}
+              contentContainerStyle={styles.bottomSheetScrollContent}
               showsVerticalScrollIndicator={true}
               bounces={false}
             >
@@ -521,6 +518,7 @@ export default function ProjectsScreen() {
                 styles.bottomSheetActionsContainer,
                 {
                   borderTopColor: theme.colors.border,
+                  borderTopWidth: 1,
                   backgroundColor: theme.colors.surface,
                   paddingBottom: insets.bottom + 16,
                 },
@@ -724,11 +722,11 @@ const createStyles = (colors: any) =>
     },
     bottomSheetWrapper: {
       flex: 1,
+      flexDirection: 'column',
     },
     bottomSheetActionsContainer: {
       paddingHorizontal: 20,
       paddingTop: 16,
-      marginTop: 12,
     },
     modalTitle: {
       fontSize: 20,
@@ -775,10 +773,7 @@ const createStyles = (colors: any) =>
     },
     modalActions: {
       flexDirection: 'row',
-  
       gap: 12,
-      marginTop: 20,
-      marginBottom: 20,
     },
     modalButton: {
       flex: 1,
